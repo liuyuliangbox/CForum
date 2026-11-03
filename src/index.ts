@@ -165,16 +165,18 @@ export default {
 
 		// Ensure the database schema exists before anything else.
 		const ensureSchema = async () => {
+			let schemaReady = false;
 			try {
 				await env.cforum_db.prepare('SELECT 1 FROM posts LIMIT 1').first();
-				return;
+				schemaReady = true;
 			} catch (err: any) {
 				console.warn('Database schema missing, initializing', err);
 			}
 
-			// using prepare().run() instead of exec ensures each statement is committed
-			const stmts = [
-				`CREATE TABLE IF NOT EXISTS users (
+			if (!schemaReady) {
+				// using prepare().run() instead of exec ensures each statement is committed
+				const stmts = [
+					`CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE,
   username TEXT NOT NULL,
@@ -193,13 +195,13 @@ export default {
   email_notifications INTEGER DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`,
-				`CREATE TABLE IF NOT EXISTS categories (
+					`CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   admin_only INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`,
-				`CREATE TABLE IF NOT EXISTS posts (
+					`CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   author_id INTEGER NOT NULL,
   title TEXT NOT NULL,
@@ -211,7 +213,7 @@ export default {
   FOREIGN KEY (author_id) REFERENCES users(id),
   FOREIGN KEY (category_id) REFERENCES categories(id)
 );`,
-				`CREATE TABLE IF NOT EXISTS comments (
+					`CREATE TABLE IF NOT EXISTS comments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   post_id INTEGER NOT NULL,
   parent_id INTEGER,
@@ -222,7 +224,7 @@ export default {
   FOREIGN KEY (parent_id) REFERENCES comments(id),
   FOREIGN KEY (author_id) REFERENCES users(id)
 );`,
-				`CREATE TABLE IF NOT EXISTS likes (
+					`CREATE TABLE IF NOT EXISTS likes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   post_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
@@ -231,22 +233,22 @@ export default {
   FOREIGN KEY (post_id) REFERENCES posts(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );`,
-				`CREATE TABLE IF NOT EXISTS settings (
+					`CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
 );`,
-				`CREATE TABLE IF NOT EXISTS nonces (
+					`CREATE TABLE IF NOT EXISTS nonces (
   nonce TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL
 );`,
-				`CREATE TABLE IF NOT EXISTS sessions (
+					`CREATE TABLE IF NOT EXISTS sessions (
   jti TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );`,
-				`CREATE TABLE IF NOT EXISTS audit_logs (
+					`CREATE TABLE IF NOT EXISTS audit_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
   action TEXT NOT NULL,
@@ -256,27 +258,27 @@ export default {
   ip_address TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`,
-				`INSERT OR IGNORE INTO settings (key, value) VALUES ('turnstile_enabled', '0');`,
-				`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_title', 'liuyuliangbox / Project Turn');`,
-				`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_tagline', '由 Cloudflare Workers、Pages、D1、R2 提供服务。');`,
-				`INSERT OR IGNORE INTO users (email, username, password, role, verified, nickname) VALUES 
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('turnstile_enabled', '0');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_title', 'liuyuliangbox / Project Turn');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_tagline', '由 Cloudflare Workers、Pages、D1、R2 提供服务。');`,
+					`INSERT OR IGNORE INTO users (email, username, password, role, verified, nickname) VALUES 
 ('admin@adysec.com', 'Admin', 'e86f78a8a3caf0b60d8e74e5942aa6d86dc150cd3c03338aef25b7d2d7e3acc7', 'admin', 1, 'System Admin');`
-			];
-			for (const stmt of stmts) {
+				];
+				for (const stmt of stmts) {
+					try {
+						await env.cforum_db.prepare(stmt).run();
+					} catch (e) {
+						console.error('Error running schema statement', e, stmt);
+					}
+				}
 				try {
-					await env.cforum_db.prepare(stmt).run();
+					await env.cforum_db.prepare('SELECT 1 FROM posts LIMIT 1').first();
 				} catch (e) {
-					console.error('Error running schema statement', e, stmt);
+					console.error('Failed to verify posts table after init', e);
 				}
 			}
-			// verify posts table exists now
-			try {
-				await env.cforum_db.prepare('SELECT 1 FROM posts LIMIT 1').first();
-			} catch (e) {
-				console.error('Failed to verify posts table after init', e);
-			}
 
-			// Compat migrations for existing D1 databases
+			// Compat migrations + seeds — must run even when base tables already exist
 			try {
 				await env.cforum_db.prepare(
 					'ALTER TABLE categories ADD COLUMN admin_only INTEGER NOT NULL DEFAULT 0'
@@ -316,7 +318,7 @@ export default {
 					}
 				} else {
 					await env.cforum_db
-						.prepare(`UPDATE categories SET admin_only = 1 WHERE name = '开发进度'`)
+						.prepare(`UPDATE categories SET admin_only = 1 WHERE name = '开发进度' AND IFNULL(admin_only, 0) = 0`)
 						.run();
 				}
 			} catch (e) {
@@ -1078,8 +1080,17 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 		// GET /api/categories
 		if (url.pathname === '/api/categories' && method === 'GET') {
 			try {
-				const { results } = await env.cforum_db.prepare('SELECT * FROM categories ORDER BY created_at ASC').all();
-				return jsonResponse(results);
+				const { results } = await env.cforum_db
+					.prepare(
+						'SELECT id, name, IFNULL(admin_only, 0) AS admin_only, created_at FROM categories ORDER BY created_at ASC'
+					)
+					.all();
+				return jsonResponse(
+					(results || []).map((row: any) => ({
+						...row,
+						admin_only: Number(row.admin_only) === 1
+					}))
+				);
 			} catch (e) {
 				return handleError(e);
 			}
