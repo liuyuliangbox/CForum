@@ -167,8 +167,8 @@ jobs:
           PROJECT_NAME="cforum-cae"
           echo "📋 Listing Pages projects..."
           curl -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects?per_page=50" \
-            | node -e 'let i="";process.stdin.on("data",c=>i+=c);process.stdin.on("end",()=>{const j=JSON.parse(i); if(!j.success){console.error(i); process.exit(1);} for (const p of j.result||[]) { const domains=(p.domains||[]).join(","); console.log(`- ${p.name} | subdomain=${p.subdomain||""} | domains=${domains}`); }})'
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects" \
+            | node -e 'let i="";process.stdin.on("data",c=>i+=c);process.stdin.on("end",()=>{const j=JSON.parse(i); if(!j.success){console.error(i); return;} for (const p of j.result||[]) { const domains=(p.domains||[]).join(","); console.log(`- ${p.name} | subdomain=${p.subdomain||""} | domains=${domains}`); }})'
           if npx wrangler pages project list | grep -E "(^|\\s)${PROJECT_NAME}(\\s|$)" ; then
             echo "✅ Pages project '${PROJECT_NAME}' already exists"
           else
