@@ -660,20 +660,37 @@ export function IndexPage() {
 				</div>
 
 				{user ? (
-					<Card>
-						<CardHeader>
-							<CardTitle className="flex items-center justify-between gap-2">
-								<span>发布新帖</span>
-								<Button type="button" variant="outline" size="sm" onClick={() => setCreateOpen((v) => !v)}>
-									{createOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-									<span className="sr-only">{createOpen ? '收起' : '展开'}</span>
-								</Button>
-							</CardTitle>
+					<Card className={createOpen ? undefined : 'border-dashed'}>
+						<CardHeader className="p-0">
+							<button
+								type="button"
+								className={
+									createOpen
+										? 'flex w-full items-center justify-between gap-3 px-6 py-4 text-left transition-colors hover:bg-muted/40'
+										: 'flex w-full items-center justify-between gap-3 rounded-xl bg-gradient-to-r from-sky-500/15 via-violet-500/10 to-fuchsia-500/15 px-6 py-4 text-left transition hover:from-sky-500/25 hover:via-violet-500/20 hover:to-fuchsia-500/25'
+								}
+								onClick={() => setCreateOpen((v) => !v)}
+								aria-expanded={createOpen}
+							>
+								<div className="min-w-0 space-y-1">
+									<CardTitle className="text-base sm:text-lg">发布新帖</CardTitle>
+									<p className="text-sm font-normal text-muted-foreground">
+										{createOpen ? '再次点击可收起编辑器' : '点这里展开，写标题和内容后发布'}
+									</p>
+								</div>
+								<span
+									className={
+										createOpen
+											? 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-background'
+											: 'inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-foreground/20 bg-background px-3 text-sm font-medium shadow-sm'
+									}
+								>
+									{createOpen ? <ChevronUp className="h-4 w-4" /> : <>展开 <ChevronDown className="h-4 w-4" /></>}
+								</span>
+							</button>
 						</CardHeader>
+						{createOpen ? (
 						<CardContent>
-							{!createOpen ? (
-								<div className="text-sm text-muted-foreground">点击右侧按钮展开编辑器。</div>
-							) : (
 								<form className="space-y-4" onSubmit={createPost}>
 								{createError ? <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">{createError}</div> : null}
 								<div className="space-y-4">
@@ -789,8 +806,8 @@ export function IndexPage() {
 									{createLoading ? '发布中...' : '发布'}
 								</Button>
 							</form>
-							)}
 						</CardContent>
+						) : null}
 					</Card>
 				) : (
 					<Card>
@@ -806,28 +823,51 @@ export function IndexPage() {
 				{error ? <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">{error}</div> : null}
 
 				{showPinnedBlock ? (
-					<div className="space-y-2">
-						<div className="flex items-center gap-2 text-sm font-medium">
-							<Pin className="h-4 w-4 text-amber-600" />
+					<div className="space-y-3">
+						<div className="flex items-center gap-2 text-sm font-semibold">
+							<span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-sm">
+								<Pin className="h-3.5 w-3.5" />
+							</span>
 							置顶
 						</div>
-						<div className="divide-y rounded-md border bg-muted/20">
-							{pinnedPosts.map((p) => (
-								<a
-									key={`pin-${p.id}`}
-									href={`/posts/${p.id}`}
-									className="flex flex-col gap-1 px-3 py-3 transition-colors hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between"
-								>
-									<span className="min-w-0 truncate font-medium text-foreground">{p.title}</span>
-									<span className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-										{p.category_name ? <span>{p.category_name}</span> : null}
-										{p.category_name ? <span>·</span> : null}
-										<span>{p.author_name}</span>
-										<span>·</span>
-										<span>{formatDate(p.created_at)}</span>
-									</span>
-								</a>
-							))}
+						<div className="space-y-2">
+							{pinnedPosts.map((p, idx) => {
+								const tones = [
+									'from-amber-500/20 via-orange-400/10 to-rose-400/15 border-amber-500/30',
+									'from-violet-500/20 via-fuchsia-400/10 to-sky-400/15 border-violet-500/30',
+									'from-emerald-500/20 via-teal-400/10 to-cyan-400/15 border-emerald-500/30'
+								];
+								const tone = tones[idx % tones.length];
+								return (
+									<a
+										key={`pin-${p.id}`}
+										href={`/post?id=${p.id}`}
+										className={`block rounded-xl border bg-gradient-to-r p-3 shadow-sm transition hover:brightness-[1.03] sm:p-4 ${tone}`}
+									>
+										<div className="flex flex-wrap items-center gap-2">
+											{p.category_name ? (
+												<span className="inline-flex items-center rounded-full border border-white/40 bg-background/70 px-2 py-0.5 text-[11px] font-medium text-foreground backdrop-blur">
+													{p.category_name}
+												</span>
+											) : (
+												<span className="inline-flex items-center rounded-full border border-white/40 bg-background/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground backdrop-blur">
+													未分类
+												</span>
+											)}
+											<span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-200">
+												<Pin className="h-3 w-3" />
+												置顶
+											</span>
+										</div>
+										<div className="mt-2 text-base font-semibold text-foreground sm:text-lg">{p.title}</div>
+										<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+											<span>{p.author_name}</span>
+											<span>·</span>
+											<span>{formatDate(p.created_at)}</span>
+										</div>
+									</a>
+								);
+							})}
 						</div>
 					</div>
 				) : null}
@@ -874,7 +914,7 @@ export function IndexPage() {
 																置顶
 															</span>
 														) : null}
-														<a className="truncate text-lg font-semibold hover:underline" href={`/posts/${p.id}`}>
+														<a className="truncate text-lg font-semibold hover:underline" href={`/post?id=${p.id}`}>
 															{p.title}
 														</a>
 													</div>

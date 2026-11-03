@@ -56,10 +56,10 @@ export function SiteHeader({
 										<UserIcon className="h-4 w-4" />
 									</span>
 								)}
-								<span className="hidden sm:inline">
-									欢迎，<span className="text-foreground">{user.username}</span>
+								<span className="max-w-[7.5rem] truncate sm:max-w-none">
+									<span className="hidden sm:inline">欢迎，</span>
+									<span className="text-foreground">{user.username}</span>
 								</span>
-								<span className="sr-only sm:hidden">{user.username}</span>
 								{user.role === 'admin' ? (
 									<span className="inline-flex items-center gap-1 rounded border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
 										<Shield className="h-3 w-3" />
