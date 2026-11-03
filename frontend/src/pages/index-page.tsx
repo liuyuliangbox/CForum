@@ -34,7 +34,10 @@ export function IndexPage() {
 	const [newTitle, setNewTitle] = React.useState('');
 	const [newContent, setNewContent] = React.useState('');
 	const [newCategoryId, setNewCategoryId] = React.useState<string>('');
-	const [previewOpen, setPreviewOpen] = React.useState(true);
+	const [previewOpen, setPreviewOpen] = React.useState(() =>
+		typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : false
+	);
+	const [categoriesOpen, setCategoriesOpen] = React.useState(true);
 	const [createOpen, setCreateOpen] = React.useState(false);
 	const [createLoading, setCreateLoading] = React.useState(false);
 	const [createError, setCreateError] = React.useState('');
@@ -516,97 +519,143 @@ export function IndexPage() {
 		return url;
 	}
 
+	const pinnedPosts = posts.filter((p) => !!p.is_pinned);
+	const feedPosts = posts.filter((p) => !p.is_pinned);
+	const showPinnedBlock = !loading && pinnedPosts.length > 0 && pageOffset === 0 && !searchQuery;
+
 	return (
 		<PageShell>
 			<div className="space-y-6">
 				{banner ? <div className="rounded-md border bg-muted/40 p-3 text-sm">{banner}</div> : null}
-				<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-					<div>
-						<h1 className="text-2xl font-semibold tracking-tight">
-							{config?.site_title || 'liuyuliangbox / Project Turn'}
-						</h1>
-						<p className="text-sm text-muted-foreground">
-							{config?.site_tagline || '由 Cloudflare Workers、Pages、D1、R2 提供服务。'}
-						</p>
-					</div>
-					<div className="flex items-center gap-2">
-						<label className="text-sm text-muted-foreground" htmlFor="category-filter">
-							分类
-						</label>
-						<select
-							id="category-filter"
-							className="h-9 rounded-md border bg-background px-3 text-sm"
-							value={selectedCategory}
-							onChange={(e) => {
-								setSelectedCategory(e.target.value);
-								setPageOffset(0);
-							}}
-						>
-							<option value="">全部</option>
-							<option value="uncategorized">未分类</option>
-							{categories.map((c) => (
-								<option key={c.id} value={String(c.id)}>
-									{c.name}
-								</option>
-							))}
-						</select>
-						<label className="text-sm text-muted-foreground" htmlFor="sort-filter">
-							排序
-						</label>
-						<select
-							id="sort-filter"
-							className="h-9 rounded-md border bg-background px-3 text-sm"
-							value={sortOption}
-							onChange={(e) => {
-								setSortOption(e.target.value);
-								setPageOffset(0);
-							}}
-						>
-							<option value="time_desc">最新发布</option>
-							<option value="time_asc">最早发布</option>
-							<option value="likes_desc">最多点赞</option>
-							<option value="comments_desc">最多评论</option>
-							<option value="views_desc">最多观看</option>
-						</select>
-						<form
-							className="flex items-center gap-2"
-							onSubmit={(e) => {
-								e.preventDefault();
-								setPageOffset(0);
-								setSearchQuery(searchInput.trim());
-							}}
-						>
-							<Input
-								value={searchInput}
-								onChange={(e) => setSearchInput(e.target.value)}
-								placeholder="搜索标题/内容"
-								className="h-9 w-48"
-							/>
-							<Button variant="outline" size="sm" type="submit" disabled={loading}>
-								<Search className="h-4 w-4" />
-								<span className="sr-only">搜索</span>
+				<div className="space-y-4">
+					<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+						<div>
+							<h1 className="text-2xl font-semibold tracking-tight">
+								{config?.site_title || 'liuyuliangbox / Project Turn'}
+							</h1>
+							<p className="text-sm text-muted-foreground">
+								{config?.site_tagline || '由 Cloudflare Workers、Pages、D1、R2 提供服务。'}
+							</p>
+						</div>
+						<div className="flex flex-wrap items-center gap-2">
+							<label className="text-sm text-muted-foreground" htmlFor="sort-filter">
+								排序
+							</label>
+							<select
+								id="sort-filter"
+								className="h-9 rounded-md border bg-background px-3 text-sm"
+								value={sortOption}
+								onChange={(e) => {
+									setSortOption(e.target.value);
+									setPageOffset(0);
+								}}
+							>
+								<option value="time_desc">最新发布</option>
+								<option value="time_asc">最早发布</option>
+								<option value="likes_desc">最多点赞</option>
+								<option value="comments_desc">最多评论</option>
+								<option value="views_desc">最多观看</option>
+							</select>
+							<Button variant="outline" size="sm" onClick={() => fetchPosts(0)} disabled={loading}>
+								<RefreshCw className="h-4 w-4" />
+								<span className="sr-only">刷新</span>
 							</Button>
-							{searchInput || searchQuery ? (
-								<Button
-									variant="outline"
-									size="sm"
-									type="button"
-									onClick={() => {
-										setSearchInput('');
-										setSearchQuery('');
-										setPageOffset(0);
-									}}
-									disabled={loading}
-								>
-									<X className="h-4 w-4" />
-									<span className="sr-only">清除</span>
-								</Button>
-							) : null}
-						</form>
-						<Button variant="outline" size="sm" onClick={() => fetchPosts(0)} disabled={loading}>
-							<RefreshCw className="h-4 w-4" />
-							<span className="sr-only">刷新</span>
+						</div>
+					</div>
+
+					<form
+						className="flex w-full items-center gap-2"
+						onSubmit={(e) => {
+							e.preventDefault();
+							setPageOffset(0);
+							setSearchQuery(searchInput.trim());
+						}}
+					>
+						<Input
+							value={searchInput}
+							onChange={(e) => setSearchInput(e.target.value)}
+							placeholder="搜索标题/内容"
+							className="h-9 min-w-0 flex-1"
+						/>
+						<Button variant="outline" size="sm" type="submit" disabled={loading}>
+							<Search className="h-4 w-4" />
+							<span className="sr-only">搜索</span>
 						</Button>
+						{searchInput || searchQuery ? (
+							<Button
+								variant="outline"
+								size="sm"
+								type="button"
+								onClick={() => {
+									setSearchInput('');
+									setSearchQuery('');
+									setPageOffset(0);
+								}}
+								disabled={loading}
+							>
+								<X className="h-4 w-4" />
+								<span className="sr-only">清除</span>
+							</Button>
+						) : null}
+					</form>
+
+					<div className="space-y-2">
+						<button
+							type="button"
+							className="inline-flex items-center gap-1 text-sm font-medium text-foreground"
+							onClick={() => setCategoriesOpen((v) => !v)}
+							aria-expanded={categoriesOpen}
+						>
+							分类
+							{categoriesOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+						</button>
+						{categoriesOpen ? (
+							<div className="flex flex-wrap gap-2" role="listbox" aria-label="分类筛选">
+								{(
+									[
+										{ id: '', label: '全部', adminOnly: false },
+										{ id: 'uncategorized', label: '未分类', adminOnly: false },
+										...categories.map((c) => ({
+											id: String(c.id),
+											label: c.name,
+											adminOnly: !!(c.admin_only === true || c.admin_only === 1)
+										}))
+									] as Array<{ id: string; label: string; adminOnly: boolean }>
+								).map((chip) => {
+									const active = selectedCategory === chip.id;
+									return (
+										<button
+											key={chip.id || 'all'}
+											type="button"
+											role="option"
+											aria-selected={active}
+											className={
+												active
+													? 'inline-flex items-center gap-1 rounded-full border border-foreground bg-foreground px-3 py-1 text-xs font-medium text-background'
+													: 'inline-flex items-center gap-1 rounded-full border bg-background px-3 py-1 text-xs font-medium text-foreground hover:bg-muted/60'
+											}
+											onClick={() => {
+												setSelectedCategory(chip.id);
+												setPageOffset(0);
+											}}
+										>
+											{chip.label}
+											{chip.adminOnly ? (
+												<span
+													className={
+														active
+															? 'rounded bg-background/20 px-1 py-px text-[10px]'
+															: 'rounded bg-amber-500/15 px-1 py-px text-[10px] text-amber-700 dark:text-amber-300'
+													}
+												>
+													公告
+												</span>
+											) : null}
+										</button>
+									);
+								})}
+							</div>
+						) : null}
 					</div>
 				</div>
 
@@ -656,7 +705,7 @@ export function IndexPage() {
 								<div className="flex flex-wrap items-center justify-between gap-2">
 									<Label htmlFor="new-content">内容 (支持 Markdown)</Label>
 									<div className="flex items-center gap-2">
-										<span className="text-xs text-muted-foreground">快捷键：Ctrl+1/2/3、Ctrl+B/I/U、Ctrl+K、Ctrl+Shift+K</span>
+										<span className="hidden text-xs text-muted-foreground lg:inline">快捷键：Ctrl+1/2/3、Ctrl+B/I/U、Ctrl+K、Ctrl+Shift+K</span>
 										<Button type="button" variant="outline" size="sm" onClick={() => setPreviewOpen((v) => !v)}>
 											{previewOpen ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
 											<span className="sr-only">{previewOpen ? '关闭预览' : '打开预览'}</span>
@@ -756,6 +805,33 @@ export function IndexPage() {
 
 				{error ? <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">{error}</div> : null}
 
+				{showPinnedBlock ? (
+					<div className="space-y-2">
+						<div className="flex items-center gap-2 text-sm font-medium">
+							<Pin className="h-4 w-4 text-amber-600" />
+							置顶
+						</div>
+						<div className="divide-y rounded-md border bg-muted/20">
+							{pinnedPosts.map((p) => (
+								<a
+									key={`pin-${p.id}`}
+									href={`/posts/${p.id}`}
+									className="flex flex-col gap-1 px-3 py-3 transition-colors hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between"
+								>
+									<span className="min-w-0 truncate font-medium text-foreground">{p.title}</span>
+									<span className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+										{p.category_name ? <span>{p.category_name}</span> : null}
+										{p.category_name ? <span>·</span> : null}
+										<span>{p.author_name}</span>
+										<span>·</span>
+										<span>{formatDate(p.created_at)}</span>
+									</span>
+								</a>
+							))}
+						</div>
+					</div>
+				) : null}
+
 				<div className="space-y-4">
 					<div ref={listTopRef} />
 					{loading ? (
@@ -766,8 +842,12 @@ export function IndexPage() {
 						<Card>
 							<CardContent className="py-6 text-sm text-muted-foreground">暂无帖子</CardContent>
 						</Card>
+					) : feedPosts.length === 0 && showPinnedBlock ? (
+						<Card>
+							<CardContent className="py-6 text-sm text-muted-foreground">本页其余帖子已在置顶区展示</CardContent>
+						</Card>
 					) : (
-						posts.map((p) => {
+						(showPinnedBlock ? feedPosts : posts).map((p) => {
 							const coverUrl = getCoverImageUrl(p.content || '');
 							const isAdmin = user?.role === 'admin';
 							const menuOpen = adminMenuPostId === p.id;

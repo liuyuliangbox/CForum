@@ -1,0 +1,3 @@
+# Pretty post URLs → post detail page (200 = rewrite, keep URL)
+/posts/:id /post.html?id=:id 200
+/post/:id /post.html?id=:id 200
