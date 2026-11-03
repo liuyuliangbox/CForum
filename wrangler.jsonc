@@ -84,7 +84,7 @@
 	"env": {
 		"production": {
 			"vars": {
-				"WORKER_URL": "https://cforum.adysec.workers.dev"
+				"WORKER_URL": ""
 			}
 		},
 		"development": {

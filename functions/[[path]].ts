@@ -26,12 +26,17 @@ export const onRequest: PagesFunction = async (context) => {
 
 	try {
 		const isLocalDev = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-		let workerUrl = (env.WORKER_URL as string) ||
-			(isLocalDev ? 'http://localhost:8787' : 'https://cforum.adysec.workers.dev');
+		let workerUrl = (env.WORKER_URL as string) || (isLocalDev ? 'http://localhost:8787' : '');
 
-		if (!workerUrl.startsWith('http')) {
-			console.warn(`⚠️ Invalid WORKER_URL: ${workerUrl}`);
-			workerUrl = isLocalDev ? 'http://localhost:8787' : 'https://cforum.adysec.workers.dev';
+		if (!workerUrl || !workerUrl.startsWith('http')) {
+			console.error('WORKER_URL is missing or invalid. Set Pages env WORKER_URL to your Worker URL.');
+			return Response.json(
+				{
+					error: 'Forum API proxy is not configured',
+					message: 'Missing WORKER_URL on Cloudflare Pages',
+				},
+				{ status: 500, headers: corsHeaders }
+			);
 		}
 
 		console.log(`↔️ Proxying request to Worker: ${workerUrl}${pathname}`);
