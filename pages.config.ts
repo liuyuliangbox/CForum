@@ -9,7 +9,7 @@
 
 export default {
 	// Pages 项目配置
-	projectName: 'cforum',
+	projectName: 'cforum-cae',
 	
 	// 构建配置
 	build: {

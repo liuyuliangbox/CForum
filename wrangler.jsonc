@@ -84,7 +84,7 @@
 	"env": {
 		"production": {
 			"vars": {
-				"WORKER_URL": ""
+				"WORKER_URL": "https://cforum.563021874.workers.dev"
 			}
 		},
 		"development": {
