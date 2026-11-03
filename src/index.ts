@@ -196,6 +196,7 @@ export default {
 				`CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
+  admin_only INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`,
 				`CREATE TABLE IF NOT EXISTS posts (
@@ -256,6 +257,8 @@ export default {
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`,
 				`INSERT OR IGNORE INTO settings (key, value) VALUES ('turnstile_enabled', '0');`,
+				`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_title', 'liuyuliangbox / Project Turn');`,
+				`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_tagline', '由 Cloudflare Workers、Pages、D1、R2 提供服务。');`,
 				`INSERT OR IGNORE INTO users (email, username, password, role, verified, nickname) VALUES 
 ('admin@adysec.com', 'Admin', 'e86f78a8a3caf0b60d8e74e5942aa6d86dc150cd3c03338aef25b7d2d7e3acc7', 'admin', 1, 'System Admin');`
 			];
@@ -271,6 +274,53 @@ export default {
 				await env.cforum_db.prepare('SELECT 1 FROM posts LIMIT 1').first();
 			} catch (e) {
 				console.error('Failed to verify posts table after init', e);
+			}
+
+			// Compat migrations for existing D1 databases
+			try {
+				await env.cforum_db.prepare(
+					'ALTER TABLE categories ADD COLUMN admin_only INTEGER NOT NULL DEFAULT 0'
+				).run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_title', 'liuyuliangbox / Project Turn')`)
+					.run();
+				await env.cforum_db
+					.prepare(
+						`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_tagline', '由 Cloudflare Workers、Pages、D1、R2 提供服务。')`
+					)
+					.run();
+			} catch (e) {
+				console.error('Failed to seed brand settings', e);
+			}
+			try {
+				const existingGame = await env.cforum_db
+					.prepare(`SELECT id FROM categories WHERE name = '开发进度' LIMIT 1`)
+					.first();
+				if (!existingGame) {
+					const seedCats: Array<{ name: string; admin_only: number }> = [
+						{ name: '开发进度', admin_only: 1 },
+						{ name: '玩法建议', admin_only: 0 },
+						{ name: 'Bug/体验', admin_only: 0 },
+						{ name: '美术氛围', admin_only: 0 },
+						{ name: '闲聊/招募', admin_only: 0 }
+					];
+					for (const cat of seedCats) {
+						await env.cforum_db
+							.prepare('INSERT OR IGNORE INTO categories (name, admin_only) VALUES (?, ?)')
+							.bind(cat.name, cat.admin_only)
+							.run();
+					}
+				} else {
+					await env.cforum_db
+						.prepare(`UPDATE categories SET admin_only = 1 WHERE name = '开发进度'`)
+						.run();
+				}
+			} catch (e) {
+				console.error('Failed to seed game categories', e);
 			}
 		};
 
@@ -335,12 +385,23 @@ export default {
              }
         }
 
+		const BOOL_SETTING_KEYS = new Set([
+			'turnstile_enabled',
+			'notify_on_user_delete',
+			'notify_on_username_change',
+			'notify_on_avatar_change',
+			'notify_on_manual_verify'
+		]);
+		const STRING_SETTING_KEYS = new Set(['site_title', 'site_tagline']);
+
 		// GET /api/config
 		if (url.pathname === '/api/config' && method === 'GET') {
 			try {
-				const [setting, userCount] = await Promise.all([
+				const [setting, userCount, titleRow, taglineRow] = await Promise.all([
 					env.cforum_db.prepare("SELECT value FROM settings WHERE key = 'turnstile_enabled'").first<DBSetting>(),
-					env.cforum_db.prepare('SELECT COUNT(*) as count FROM users').first('count')
+					env.cforum_db.prepare('SELECT COUNT(*) as count FROM users').first('count'),
+					env.cforum_db.prepare("SELECT value FROM settings WHERE key = 'site_title'").first<DBSetting>(),
+					env.cforum_db.prepare("SELECT value FROM settings WHERE key = 'site_tagline'").first<DBSetting>()
 				]);
 				
 				// 只有数据库设置为启用，且两个环境变量都配置时，才启用 Turnstile
@@ -353,7 +414,9 @@ export default {
 					turnstile_enabled: turnstileFullyConfigured,
 					turnstile_site_key: siteKey,
 					user_count: userCount || 0,
-					jwt_secret_configured: !!env.JWT_SECRET && String(env.JWT_SECRET).length >= 32
+					jwt_secret_configured: !!env.JWT_SECRET && String(env.JWT_SECRET).length >= 32,
+					site_title: titleRow?.value || 'liuyuliangbox / Project Turn',
+					site_tagline: taglineRow?.value || '由 Cloudflare Workers、Pages、D1、R2 提供服务。'
 				});
 			} catch (e) {
 				return handleError(e);
@@ -372,12 +435,20 @@ export default {
 					notify_on_user_delete: false,
 					notify_on_username_change: false,
 					notify_on_avatar_change: false,
-					notify_on_manual_verify: false
+					notify_on_manual_verify: false,
+					site_title: 'liuyuliangbox / Project Turn',
+					site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。'
 				};
 				
 				if (settings.results) {
 					for (const row of settings.results) {
-						config[row.key as string] = row.value === '1';
+						const key = row.key as string;
+						const value = row.value as string;
+						if (BOOL_SETTING_KEYS.has(key)) {
+							config[key] = value === '1';
+						} else if (STRING_SETTING_KEYS.has(key)) {
+							config[key] = value;
+						}
 					}
 				}
 				
@@ -394,7 +465,7 @@ export default {
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { turnstile_enabled, notify_on_user_delete, notify_on_username_change, notify_on_avatar_change, notify_on_manual_verify } = body;
+				const { turnstile_enabled, notify_on_user_delete, notify_on_username_change, notify_on_avatar_change, notify_on_manual_verify, site_title, site_tagline } = body;
 				
 				const stmt = env.cforum_db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
 				const batch = [];
@@ -404,6 +475,8 @@ export default {
 				if (notify_on_username_change !== undefined) batch.push(stmt.bind('notify_on_username_change', notify_on_username_change ? '1' : '0'));
 				if (notify_on_avatar_change !== undefined) batch.push(stmt.bind('notify_on_avatar_change', notify_on_avatar_change ? '1' : '0'));
 				if (notify_on_manual_verify !== undefined) batch.push(stmt.bind('notify_on_manual_verify', notify_on_manual_verify ? '1' : '0'));
+				if (site_title !== undefined) batch.push(stmt.bind('site_title', String(site_title).slice(0, 80)));
+				if (site_tagline !== undefined) batch.push(stmt.bind('site_tagline', String(site_tagline).slice(0, 160)));
 				
 				if (batch.length > 0) await env.cforum_db.batch(batch);
 
@@ -1019,11 +1092,14 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { name } = body;
+				const { name, admin_only } = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				
-				const { success } = await env.cforum_db.prepare('INSERT INTO categories (name) VALUES (?)').bind(name).run();
-				await security.logAudit(userPayload.id, 'CREATE_CATEGORY', 'category', name, {}, request);
+				const { success } = await env.cforum_db
+					.prepare('INSERT INTO categories (name, admin_only) VALUES (?, ?)')
+					.bind(name, admin_only ? 1 : 0)
+					.run();
+				await security.logAudit(userPayload.id, 'CREATE_CATEGORY', 'category', name, { admin_only: !!admin_only }, request);
 				return jsonResponse({ success });
 			} catch (e) {
 				return handleError(e);
@@ -1038,11 +1114,14 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { name } = body;
+				const { name, admin_only } = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				
-				await env.cforum_db.prepare('UPDATE categories SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(name, id).run();
-				await security.logAudit(userPayload.id, 'UPDATE_CATEGORY', 'category', id, { name }, request);
+				await env.cforum_db
+					.prepare('UPDATE categories SET name = ?, admin_only = ? WHERE id = ?')
+					.bind(name, admin_only ? 1 : 0, id)
+					.run();
+				await security.logAudit(userPayload.id, 'UPDATE_CATEGORY', 'category', id, { name, admin_only: !!admin_only }, request);
 				return jsonResponse({ success: true });
 			} catch (e) {
 				return handleError(e);
@@ -1690,10 +1769,16 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (content.length > 3000) return jsonResponse({ error: 'Content too long (Max 3000 chars)' }, 400);
 				if (hasControlCharacters(title) || hasControlCharacters(content)) return jsonResponse({ error: 'Title or content contains invalid control characters' }, 400);
 
-				// Validate Category
+				// Validate Category + announcement restriction
 				if (category_id) {
-					const category = await env.cforum_db.prepare('SELECT id FROM categories WHERE id = ?').bind(category_id).first();
+					const category = await env.cforum_db
+						.prepare('SELECT id, admin_only FROM categories WHERE id = ?')
+						.bind(category_id)
+						.first<any>();
 					if (!category) return jsonResponse({ error: 'Category not found' }, 400);
+					if (category.admin_only && userPayload.role !== 'admin') {
+						return jsonResponse({ error: '该分类仅管理员可发帖' }, 403);
+					}
 				}
 
 				await env.cforum_db.prepare(
@@ -1868,10 +1953,16 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					.replace(/"/g, '&quot;')
 					.replace(/'/g, '&#039;');
 
-				// Validate Category
+				// Validate Category + announcement restriction
 				if (category_id) {
-					const category = await env.cforum_db.prepare('SELECT id FROM categories WHERE id = ?').bind(category_id).first();
+					const category = await env.cforum_db
+						.prepare('SELECT id, admin_only FROM categories WHERE id = ?')
+						.bind(category_id)
+						.first<any>();
 					if (!category) return jsonResponse({ error: 'Category not found' }, 400);
+					if (category.admin_only && userPayload.role !== 'admin') {
+						return jsonResponse({ error: '该分类仅管理员可发帖' }, 403);
+					}
 				}
 
 				const { success } = await env.cforum_db.prepare(

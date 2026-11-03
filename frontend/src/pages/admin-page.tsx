@@ -28,12 +28,16 @@ export function AdminPage() {
 		notify_on_user_delete: false,
 		notify_on_username_change: false,
 		notify_on_avatar_change: false,
-		notify_on_manual_verify: false
+		notify_on_manual_verify: false,
+		site_title: 'liuyuliangbox / Project Turn',
+		site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。'
 	});
 
 	const [newCategoryName, setNewCategoryName] = React.useState('');
+	const [newCategoryAdminOnly, setNewCategoryAdminOnly] = React.useState(false);
 	const [editingCategoryId, setEditingCategoryId] = React.useState<number | null>(null);
 	const [editingCategoryName, setEditingCategoryName] = React.useState('');
+	const [editingCategoryAdminOnly, setEditingCategoryAdminOnly] = React.useState(false);
 
 	const [editOpen, setEditOpen] = React.useState(false);
 	const [editUserId, setEditUserId] = React.useState<number | null>(null);
@@ -69,7 +73,9 @@ export function AdminPage() {
 				notify_on_user_delete: !!settings.notify_on_user_delete,
 				notify_on_username_change: !!settings.notify_on_username_change,
 				notify_on_avatar_change: !!settings.notify_on_avatar_change,
-				notify_on_manual_verify: !!settings.notify_on_manual_verify
+				notify_on_manual_verify: !!settings.notify_on_manual_verify,
+				site_title: settings.site_title || 'liuyuliangbox / Project Turn',
+				site_tagline: settings.site_tagline || '由 Cloudflare Workers、Pages、D1、R2 提供服务。'
 			});
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -109,9 +115,10 @@ export function AdminPage() {
 			await apiFetch('/admin/categories', {
 				method: 'POST',
 				headers: getSecurityHeaders('POST'),
-				body: JSON.stringify({ name: newCategoryName })
+				body: JSON.stringify({ name: newCategoryName, admin_only: newCategoryAdminOnly })
 			});
 			setNewCategoryName('');
+			setNewCategoryAdminOnly(false);
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -129,10 +136,11 @@ export function AdminPage() {
 			await apiFetch(`/admin/categories/${id}`, {
 				method: 'PUT',
 				headers: getSecurityHeaders('PUT'),
-				body: JSON.stringify({ name: editingCategoryName })
+				body: JSON.stringify({ name: editingCategoryName, admin_only: editingCategoryAdminOnly })
 			});
 			setEditingCategoryId(null);
 			setEditingCategoryName('');
+			setEditingCategoryAdminOnly(false);
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -277,6 +285,27 @@ export function AdminPage() {
 								<CardTitle>站点设置</CardTitle>
 							</CardHeader>
 							<CardContent className="space-y-4">
+								<div className="grid gap-3 sm:grid-cols-2">
+									<div className="space-y-2">
+										<Label htmlFor="site-title">站点标题</Label>
+										<Input
+											id="site-title"
+											value={systemSettings.site_title}
+											onChange={(e) => setSystemSettings((s) => ({ ...s, site_title: e.target.value }))}
+											maxLength={80}
+										/>
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="site-tagline">副标题</Label>
+										<Input
+											id="site-tagline"
+											value={systemSettings.site_tagline}
+											onChange={(e) => setSystemSettings((s) => ({ ...s, site_tagline: e.target.value }))}
+											maxLength={160}
+										/>
+									</div>
+								</div>
+								<Separator />
 								<label className="flex items-center gap-2 text-sm">
 									<input
 										type="checkbox"
@@ -336,11 +365,20 @@ export function AdminPage() {
 								<CardTitle>分类管理</CardTitle>
 							</CardHeader>
 							<CardContent className="space-y-4">
-								<div className="flex flex-wrap items-end gap-2">
+								<div className="flex flex-wrap items-end gap-3">
 									<div className="space-y-2">
 										<Label htmlFor="cat-name">分类名称</Label>
 										<Input id="cat-name" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} />
 									</div>
+									<label className="mb-2 flex items-center gap-2 text-sm">
+										<input
+											type="checkbox"
+											className="h-4 w-4"
+											checked={newCategoryAdminOnly}
+											onChange={(e) => setNewCategoryAdminOnly(e.target.checked)}
+										/>
+										仅管理员发帖
+									</label>
 									<Button onClick={createCategory} disabled={loading}>
 										添加
 									</Button>
@@ -349,13 +387,29 @@ export function AdminPage() {
 									{categories.map((c) => (
 										<div key={c.id} className="flex items-center justify-between rounded-md border p-3 text-sm">
 											{editingCategoryId === c.id ? (
-												<Input
-													value={editingCategoryName}
-													onChange={(e) => setEditingCategoryName(e.target.value)}
-													className="h-9 max-w-xs"
-												/>
+												<div className="flex flex-wrap items-center gap-3">
+													<Input
+														value={editingCategoryName}
+														onChange={(e) => setEditingCategoryName(e.target.value)}
+														className="h-9 max-w-xs"
+													/>
+													<label className="flex items-center gap-2 text-sm">
+														<input
+															type="checkbox"
+															className="h-4 w-4"
+															checked={editingCategoryAdminOnly}
+															onChange={(e) => setEditingCategoryAdminOnly(e.target.checked)}
+														/>
+														仅管理员发帖
+													</label>
+												</div>
 											) : (
-												<span>{c.name}</span>
+												<span>
+													{c.name}
+													{c.admin_only ? (
+														<span className="ml-2 text-xs text-muted-foreground">（仅管理员发帖）</span>
+													) : null}
+												</span>
 											)}
 											<div className="flex items-center gap-2">
 												{editingCategoryId === c.id ? (
@@ -370,6 +424,7 @@ export function AdminPage() {
 															onClick={() => {
 																setEditingCategoryId(null);
 																setEditingCategoryName('');
+																setEditingCategoryAdminOnly(false);
 															}}
 														>
 															取消
@@ -382,6 +437,7 @@ export function AdminPage() {
 														onClick={() => {
 															setEditingCategoryId(c.id);
 															setEditingCategoryName(c.name);
+															setEditingCategoryAdminOnly(!!c.admin_only);
 														}}
 													>
 														编辑

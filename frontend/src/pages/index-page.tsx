@@ -522,8 +522,12 @@ export function IndexPage() {
 				{banner ? <div className="rounded-md border bg-muted/40 p-3 text-sm">{banner}</div> : null}
 				<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<div>
-							<h1 className="text-2xl font-semibold tracking-tight">liuyuliangbox / Project Turn</h1>
-						<p className="text-sm text-muted-foreground">由 Cloudflare Workers、Pages、D1、R2 提供服务。</p>
+						<h1 className="text-2xl font-semibold tracking-tight">
+							{config?.site_title || 'liuyuliangbox / Project Turn'}
+						</h1>
+						<p className="text-sm text-muted-foreground">
+							{config?.site_tagline || '由 Cloudflare Workers、Pages、D1、R2 提供服务。'}
+						</p>
 					</div>
 					<div className="flex items-center gap-2">
 						<label className="text-sm text-muted-foreground" htmlFor="category-filter">
@@ -637,11 +641,14 @@ export function IndexPage() {
 											onChange={(e) => setNewCategoryId(e.target.value)}
 										>
 											<option value="">无分类</option>
-											{categories.map((c) => (
-												<option key={c.id} value={String(c.id)}>
-													{c.name}
-												</option>
-											))}
+											{categories
+												.filter((c) => !c.admin_only || user?.role === 'admin')
+												.map((c) => (
+													<option key={c.id} value={String(c.id)}>
+														{c.name}
+														{c.admin_only ? '（仅管理员）' : ''}
+													</option>
+												))}
 										</select>
 									</div>
 								</div>

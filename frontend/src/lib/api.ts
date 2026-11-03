@@ -5,11 +5,14 @@ export type ForumConfig = {
 	turnstile_site_key: string;
 	user_count?: number;
 	jwt_secret_configured?: boolean; // indicates whether JWT_SECRET is set in backend
+	site_title?: string;
+	site_tagline?: string;
 };
 
 export type Category = {
 	id: number;
 	name: string;
+	admin_only?: number | boolean;
 	created_at: string;
 };
 
