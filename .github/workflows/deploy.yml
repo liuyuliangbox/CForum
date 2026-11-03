@@ -196,7 +196,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: pages deploy public --project-name=cforum-cae
+          command: pages deploy public --project-name=cforum-cae --branch=main
 
       - name: Apply D1 migrations
         run: npx wrangler d1 migrations apply cforum-db --remote
