@@ -336,9 +336,22 @@ export function PostPage() {
 					</Card>
 				) : (
 					<>
-						<Card>
+						<Card className="overflow-hidden border-violet-500/25 bg-gradient-to-br from-sky-500/15 via-violet-500/10 to-fuchsia-500/15 shadow-sm">
 							<CardHeader>
 								<CardTitle className="flex flex-col gap-2">
+									<div className="flex flex-wrap items-center gap-2">
+										{post.is_pinned ? (
+											<span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-200">
+												<Pin className="h-3 w-3" />
+												置顶
+											</span>
+										) : null}
+										{post.category_name ? (
+											<span className="inline-flex items-center rounded-full border border-white/40 bg-background/70 px-2 py-0.5 text-[11px] font-medium text-foreground backdrop-blur">
+												{post.category_name}
+											</span>
+										) : null}
+									</div>
 									<span>{post.title}</span>
 									<span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-normal text-muted-foreground">
 										<span className="inline-flex items-center gap-2">
@@ -529,11 +542,13 @@ export function PostPage() {
 										</Button>
 									</div>
 								) : (
-									<div
-										className="prose max-w-none break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
-										ref={contentRef}
-										dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(post.content || '') }}
-									/>
+									<div className="rounded-xl border border-white/40 bg-background/60 p-4 backdrop-blur-sm sm:p-5">
+										<div
+											className="prose max-w-none break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
+											ref={contentRef}
+											dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(post.content || '') }}
+										/>
+									</div>
 								)}
 							</CardContent>
 						</Card>

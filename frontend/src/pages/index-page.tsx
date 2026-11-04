@@ -893,8 +893,16 @@ export function IndexPage() {
 							const menuOpen = adminMenuPostId === p.id;
 							const actionLoading = adminActionPostId === p.id;
 							return (
-								<Card key={p.id}>
-									<CardContent className="py-5">
+								<Card
+									key={p.id}
+									className="group relative overflow-hidden transition hover:border-foreground/25 hover:shadow-sm"
+								>
+									<a
+										href={`/post?id=${p.id}`}
+										className="absolute inset-0 z-0"
+										aria-label={`查看帖子：${p.title}`}
+									/>
+									<CardContent className="relative z-10 py-5 pointer-events-none">
 										<div className="flex gap-4">
 											{coverUrl ? (
 												<img
@@ -914,12 +922,10 @@ export function IndexPage() {
 																置顶
 															</span>
 														) : null}
-														<a className="truncate text-lg font-semibold hover:underline" href={`/post?id=${p.id}`}>
-															{p.title}
-														</a>
+														<span className="truncate text-lg font-semibold group-hover:underline">{p.title}</span>
 													</div>
 													{isAdmin ? (
-														<div className="relative">
+														<div className="relative pointer-events-auto">
 															<Button
 																type="button"
 																variant="ghost"
