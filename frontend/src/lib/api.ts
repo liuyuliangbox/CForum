@@ -26,6 +26,8 @@ export type Post = {
 	category_id: number | null;
 	category_name?: string | null;
 	is_pinned?: number;
+	/** 1=可见（默认），0=隐藏；作者与管理员可切换；官网同步仅取可见帖 */
+	is_visible?: number;
 	view_count?: number;
 	created_at: string;
 	author_name?: string;

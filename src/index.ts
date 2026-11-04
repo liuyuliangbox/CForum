@@ -231,6 +231,7 @@ export default {
   content TEXT NOT NULL,
   category_id INTEGER,
   is_pinned INTEGER DEFAULT 0,
+  is_visible INTEGER NOT NULL DEFAULT 1,
   view_count INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (author_id) REFERENCES users(id),
@@ -319,6 +320,13 @@ export default {
 			try {
 				await env.cforum_db.prepare(
 					'ALTER TABLE categories ADD COLUMN show_on_forum INTEGER NOT NULL DEFAULT 1'
+				).run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db.prepare(
+					'ALTER TABLE posts ADD COLUMN is_visible INTEGER NOT NULL DEFAULT 1'
 				).run();
 			} catch {
 				// column already exists
@@ -435,6 +443,14 @@ export default {
 				throw new Error('Unauthorized');
 			}
 			return payload;
+		};
+
+		const tryAuthenticate = async (req: Request): Promise<UserPayload | null> => {
+			try {
+				return await authenticate(req);
+			} catch {
+				return null;
+			}
 		};
 
 		// Helper to handle errors
@@ -1232,7 +1248,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					FROM posts
 					JOIN users ON posts.author_id = users.id
 					JOIN categories ON posts.category_id = categories.id
-					WHERE IFNULL(categories.show_on_site, 0) = 1`;
+					WHERE IFNULL(categories.show_on_site, 0) = 1
+					  AND IFNULL(posts.is_visible, 1) = 1`;
 				const params: any[] = [];
 				if (categoryId) {
 					query += ` AND posts.category_id = ?`;
@@ -1280,7 +1297,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						 FROM posts
 						 JOIN users ON posts.author_id = users.id
 						 JOIN categories ON posts.category_id = categories.id
-						 WHERE posts.id = ? AND IFNULL(categories.show_on_site, 0) = 1`
+						 WHERE posts.id = ? AND IFNULL(categories.show_on_site, 0) = 1
+						   AND IFNULL(posts.is_visible, 1) = 1`
 					)
 					.bind(postId)
 					.first();
@@ -1913,6 +1931,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 		// GET /posts
 		if (url.pathname === '/api/posts' && method === 'GET') {
 			try {
+				const viewer = await tryAuthenticate(request);
+				const isAdmin = viewer?.role === 'admin';
 				const limit = parseInt(url.searchParams.get('limit') || '20');
 				const offset = parseInt(url.searchParams.get('offset') || '0');
 				const categoryId = url.searchParams.get('category_id');
@@ -1933,7 +1953,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
                      JOIN users ON posts.author_id = users.id 
                      LEFT JOIN categories ON posts.category_id = categories.id`;
                 
-                let countQuery = `SELECT COUNT(*) as total FROM posts`;
+                let countQuery = `SELECT COUNT(*) as total FROM posts LEFT JOIN categories ON posts.category_id = categories.id`;
 
                 const params: any[] = [];
                 const countParams: any[] = [];
@@ -1946,10 +1966,25 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						conditions.push(`posts.category_id = ?`);
                         params.push(categoryId);
                         countParams.push(categoryId);
+						// Non-admins cannot open forum-hidden categories via API
+						if (!isAdmin) {
+							conditions.push(`IFNULL(categories.show_on_forum, 1) = 1`);
+						}
                     }
-                } else {
-					// Hide forum-hidden category posts from the default feed
+                } else if (!isAdmin) {
+					// Hide forum-hidden category posts from the default feed (admins see all)
 					conditions.push(`(posts.category_id IS NULL OR IFNULL(categories.show_on_forum, 1) = 1)`);
+				}
+
+				// Visibility: guests see public only; authors see own hidden; admins see all
+				if (isAdmin) {
+					// no visibility filter
+				} else if (viewer) {
+					conditions.push(`(IFNULL(posts.is_visible, 1) = 1 OR posts.author_id = ?)`);
+					params.push(viewer.id);
+					countParams.push(viewer.id);
+				} else {
+					conditions.push(`IFNULL(posts.is_visible, 1) = 1`);
 				}
 
 				if (q) {
@@ -1961,10 +1996,6 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 
 				if (conditions.length) {
 					query += ` WHERE ${conditions.join(' AND ')}`;
-					// count query also needs categories join when filtering by show_on_forum
-					if (!categoryId) {
-						countQuery = `SELECT COUNT(*) as total FROM posts LEFT JOIN categories ON posts.category_id = categories.id`;
-					}
 					countQuery += ` WHERE ${conditions.join(' AND ')}`;
 				}
 
@@ -1998,6 +2029,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 		if (url.pathname.match(/^\/api\/posts\/\d+$/) && method === 'GET') {
 			const postId = url.pathname.split('/')[3];
 			try {
+				const viewer = await tryAuthenticate(request);
+				const isAdmin = viewer?.role === 'admin';
 				const post = await env.cforum_db.prepare(
 					`SELECT 
                         posts.*, 
@@ -2005,6 +2038,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
                         users.avatar_url as author_avatar,
                         users.role as author_role,
                         categories.name as category_name,
+						IFNULL(categories.show_on_forum, 1) AS category_show_on_forum,
                         (SELECT COUNT(*) FROM likes WHERE likes.post_id = posts.id) as like_count,
                         (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) as comment_count
                      FROM posts 
@@ -2014,6 +2048,18 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				).bind(postId).first();
 				
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
+
+				const visible = Number((post as any).is_visible ?? 1) === 1;
+				const forumShown = Number((post as any).category_show_on_forum ?? 1) === 1;
+				const isAuthor = !!viewer && Number((post as any).author_id) === viewer.id;
+				if (!isAdmin) {
+					if (!forumShown && (post as any).category_id != null) {
+						return jsonResponse({ error: 'Post not found' }, 404);
+					}
+					if (!visible && !isAuthor) {
+						return jsonResponse({ error: 'Post not found' }, 404);
+					}
+				}
 
 				try {
 					await env.cforum_db.prepare('UPDATE posts SET view_count = COALESCE(view_count, 0) + 1 WHERE id = ?').bind(postId).run();
@@ -2028,6 +2074,39 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				}
 
 				return jsonResponse(post);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/posts/:id/visibility — author or admin
+		if (url.pathname.match(/^\/api\/posts\/\d+\/visibility$/) && method === 'POST') {
+			const postId = url.pathname.split('/')[3];
+			try {
+				const userPayload = await authenticate(request);
+				const body = (await request.json()) as any;
+				const visible = !(body?.visible === false || body?.visible === 0);
+				const post = await env.cforum_db
+					.prepare('SELECT id, author_id FROM posts WHERE id = ?')
+					.bind(postId)
+					.first<{ id: number; author_id: number }>();
+				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
+				if (post.author_id !== userPayload.id && userPayload.role !== 'admin') {
+					return jsonResponse({ error: 'Unauthorized' }, 403);
+				}
+				await env.cforum_db
+					.prepare('UPDATE posts SET is_visible = ? WHERE id = ?')
+					.bind(visible ? 1 : 0, postId)
+					.run();
+				await security.logAudit(
+					userPayload.id,
+					'TOGGLE_POST_VISIBILITY',
+					'post',
+					postId,
+					{ visible },
+					request
+				);
+				return jsonResponse({ success: true, is_visible: visible ? 1 : 0 });
 			} catch (e) {
 				return handleError(e);
 			}

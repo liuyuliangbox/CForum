@@ -90,8 +90,9 @@ export function PostPage() {
 		setError('');
 		try {
 			const userParam = userId ? `?user_id=${userId}` : '';
-			const p = await apiFetch<Post>(`/posts/${postId}${userParam}`);
-			const cs = await apiFetch<Comment[]>(`/posts/${postId}/comments`);
+			const authHeaders = getSecurityHeaders('GET', null);
+			const p = await apiFetch<Post>(`/posts/${postId}${userParam}`, { headers: authHeaders });
+			const cs = await apiFetch<Comment[]>(`/posts/${postId}/comments`, { headers: authHeaders });
 			setPost(p);
 			setComments(cs);
 			setEditTitle(p.title);
@@ -270,6 +271,24 @@ export function PostPage() {
 		}
 	}
 
+	async function toggleVisibility() {
+		if (!post) return;
+		if (!user || (user.role !== 'admin' && user.id !== post.author_id)) return;
+		try {
+			const nextVisible = !(Number(post.is_visible ?? 1) === 1);
+			await apiFetch(`/posts/${post.id}/visibility`, {
+				method: 'POST',
+				headers: getSecurityHeaders('POST'),
+				body: JSON.stringify({ visible: nextVisible })
+			});
+			setPost((prev) => (prev ? { ...prev, is_visible: nextVisible ? 1 : 0 } : prev));
+		} catch (e: any) {
+			alert(String(e?.message || e));
+		} finally {
+			setAdminMenuOpen(false);
+		}
+	}
+
 	async function adminMovePostCategory(categoryId: number | null) {
 		if (!post) return;
 		if (!user || user.role !== 'admin') return;
@@ -346,6 +365,12 @@ export function PostPage() {
 												置顶
 											</span>
 										) : null}
+										{Number(post.is_visible ?? 1) === 0 ? (
+											<span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+												<EyeOff className="h-3 w-3" />
+												已隐藏
+											</span>
+										) : null}
 										{post.category_name ? (
 											<span className="inline-flex items-center rounded-full border border-white/40 bg-background/70 px-2 py-0.5 text-[11px] font-medium text-foreground backdrop-blur">
 												{post.category_name}
@@ -418,6 +443,23 @@ export function PostPage() {
 											</Button>
 											{adminMenuOpen ? (
 												<div className="absolute right-0 top-full z-[60] mt-2 max-h-64 w-44 overflow-y-auto rounded-md border bg-background p-1 shadow-lg">
+													<button
+														type="button"
+														className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+														onClick={() => void toggleVisibility()}
+													>
+														{Number(post.is_visible ?? 1) === 0 ? (
+															<>
+																<Eye className="h-4 w-4" />
+																设为可见
+															</>
+														) : (
+															<>
+																<EyeOff className="h-4 w-4" />
+																隐藏
+															</>
+														)}
+													</button>
 													{user.role === 'admin' ? (
 														<button
 															type="button"

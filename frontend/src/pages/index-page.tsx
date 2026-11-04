@@ -313,7 +313,10 @@ export function IndexPage() {
 				const categoryParam = selectedCategory ? `&category_id=${encodeURIComponent(selectedCategory)}` : '';
 				const searchParam = searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : '';
 				const sortParam = `&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}`;
-				const res = await fetch(`/api/posts?limit=${pageLimit}&offset=${offset}${categoryParam}${searchParam}${sortParam}`);
+				const headers = getSecurityHeaders('GET', null);
+				const res = await fetch(`/api/posts?limit=${pageLimit}&offset=${offset}${categoryParam}${searchParam}${sortParam}`, {
+					headers
+				});
 				if (!res.ok) {
 					let msg = `加载帖子失败 (${res.status})`;
 					try {
@@ -341,7 +344,7 @@ export function IndexPage() {
 				setLoading(false);
 			}
 		},
-		[selectedCategory, searchQuery, sortOption]
+		[selectedCategory, searchQuery, sortOption, token]
 	);
 
 	React.useEffect(() => {
@@ -403,6 +406,26 @@ export function IndexPage() {
 				method: 'POST',
 				headers: getSecurityHeaders('POST'),
 				body: JSON.stringify({ pinned: next })
+			});
+			setAdminMenuPostId(null);
+			await fetchPosts(pageOffset);
+		} catch {
+			return;
+		} finally {
+			setAdminActionPostId(null);
+		}
+	}
+
+	async function togglePostVisibility(post: Post) {
+		if (!user) return;
+		if (user.role !== 'admin' && user.id !== post.author_id) return;
+		setAdminActionPostId(post.id);
+		try {
+			const nextVisible = !(Number(post.is_visible ?? 1) === 1);
+			await apiFetch(`/posts/${post.id}/visibility`, {
+				method: 'POST',
+				headers: getSecurityHeaders('POST'),
+				body: JSON.stringify({ visible: nextVisible })
 			});
 			setAdminMenuPostId(null);
 			await fetchPosts(pageOffset);
@@ -868,6 +891,12 @@ export function IndexPage() {
 												<Pin className="h-3 w-3" />
 												置顶
 											</span>
+											{Number(p.is_visible ?? 1) === 0 ? (
+												<span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+													<EyeOff className="h-3 w-3" />
+													已隐藏
+												</span>
+											) : null}
 										</div>
 										<div className="mt-2 text-base font-semibold text-foreground sm:text-lg">{p.title}</div>
 										<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
@@ -900,6 +929,9 @@ export function IndexPage() {
 						(showPinnedBlock ? feedPosts : posts).map((p) => {
 							const coverUrl = getCoverImageUrl(p.content || '');
 							const isAdmin = user?.role === 'admin';
+							const isOwner = !!user && user.id === p.author_id;
+							const canManage = isAdmin || isOwner;
+							const isHidden = Number(p.is_visible ?? 1) === 0;
 							const menuOpen = adminMenuPostId === p.id;
 							const actionLoading = adminActionPostId === p.id;
 							return (
@@ -925,16 +957,22 @@ export function IndexPage() {
 											) : null}
 											<div className="min-w-0 flex-1 space-y-1">
 												<div className="flex items-start justify-between gap-2">
-													<div className="flex min-w-0 items-center gap-2">
+													<div className="flex min-w-0 flex-wrap items-center gap-2">
 														{p.is_pinned ? (
 															<span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
 																<Pin className="h-3.5 w-3.5" />
 																置顶
 															</span>
 														) : null}
+														{isHidden ? (
+															<span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+																<EyeOff className="h-3.5 w-3.5" />
+																已隐藏
+															</span>
+														) : null}
 														<span className="truncate text-lg font-semibold group-hover:underline">{p.title}</span>
 													</div>
-													{isAdmin ? (
+													{canManage ? (
 														<div className="relative z-20 pointer-events-auto">
 															<Button
 																type="button"
@@ -965,20 +1003,35 @@ export function IndexPage() {
 																		type="button"
 																		disabled={actionLoading}
 																		className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
-																		onClick={() => void adminTogglePin(p)}
+																		onClick={() => void togglePostVisibility(p)}
 																	>
-																		<Pin className="h-4 w-4" />
-																		{p.is_pinned ? '取消置顶' : '置顶'}
+																		{isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+																		{isHidden ? '设为可见' : '隐藏'}
 																	</button>
-																	<button
-																		type="button"
-																		disabled={actionLoading}
-																		className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
-																		onClick={() => void adminDeletePost(p)}
-																	>
-																		<Trash2 className="h-4 w-4" />
-																		删除
-																	</button>
+																	{isAdmin ? (
+																		<button
+																			type="button"
+																			disabled={actionLoading}
+																			className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+																			onClick={() => void adminTogglePin(p)}
+																		>
+																			<Pin className="h-4 w-4" />
+																			{p.is_pinned ? '取消置顶' : '置顶'}
+																		</button>
+																	) : null}
+																	{isAdmin ? (
+																		<button
+																			type="button"
+																			disabled={actionLoading}
+																			className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+																			onClick={() => void adminDeletePost(p)}
+																		>
+																			<Trash2 className="h-4 w-4" />
+																			删除
+																		</button>
+																	) : null}
+																	{isAdmin ? (
+																		<>
 																	<div className="my-1 h-px bg-border" />
 																	<div className="px-2 py-1 text-xs font-medium text-muted-foreground">移动到分类</div>
 																	<button
@@ -1000,6 +1053,8 @@ export function IndexPage() {
 																			{c.name}
 																		</button>
 																	))}
+																		</>
+																	) : null}
 																</div>
 															) : null}
 														</div>
