@@ -1278,7 +1278,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const offset = Math.max(parseInt(url.searchParams.get('offset') || '0', 10) || 0, 0);
 				const categoryId = url.searchParams.get('category_id');
 
-				// 仅官网展示：全部可见帖；同时论坛+官网展示：需官网精选
+				// 仅管理员发帖栏目：可见帖均可上官网；非管理员栏目：需官网精选
 				let query = `SELECT
 						posts.id, posts.title, posts.content, posts.category_id, posts.created_at, posts.is_pinned,
 						posts.site_featured,
@@ -1290,7 +1290,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					WHERE IFNULL(categories.show_on_site, 0) = 1
 					  AND IFNULL(posts.is_visible, 1) = 1
 					  AND (
-						IFNULL(categories.show_on_forum, 1) = 0
+						IFNULL(categories.admin_only, 0) = 1
 						OR IFNULL(posts.site_featured, 0) = 1
 					  )`;
 				const params: any[] = [];
@@ -1337,7 +1337,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 							posts.id, posts.title, posts.content, posts.category_id, posts.created_at, posts.is_pinned,
 							posts.site_featured,
 							categories.name as category_name,
-							IFNULL(categories.show_on_forum, 1) AS show_on_forum,
+							IFNULL(categories.admin_only, 0) AS admin_only,
 							users.username as author_name
 						 FROM posts
 						 JOIN users ON posts.author_id = users.id
@@ -1348,8 +1348,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					.bind(postId)
 					.first();
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
-				const dualShown = Number((post as any).show_on_forum ?? 1) === 1;
-				if (dualShown && Number((post as any).site_featured ?? 0) !== 1) {
+				const adminOnlyCat = Number((post as any).admin_only ?? 0) === 1;
+				if (!adminOnlyCat && Number((post as any).site_featured ?? 0) !== 1) {
 					return jsonResponse({ error: 'Post not found' }, 404);
 				}
 
