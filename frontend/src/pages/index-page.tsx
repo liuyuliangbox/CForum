@@ -640,7 +640,7 @@ export function IndexPage() {
 								aria-pressed={siteFeaturedOnly}
 								className={
 									siteFeaturedOnly
-										? 'inline-flex h-9 items-center gap-1 rounded-md border border-sky-600 bg-sky-600 px-3 text-sm font-medium text-white'
+										? 'inline-flex h-9 items-center gap-1 rounded-md border-0 bg-gradient-to-r from-cyan-500 to-indigo-600 px-3 text-sm font-medium text-white shadow-sm'
 										: 'inline-flex h-9 items-center gap-1 rounded-md border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted/60'
 								}
 								onClick={() => {
@@ -969,8 +969,8 @@ export function IndexPage() {
 												置顶
 											</span>
 											{Number(p.site_featured ?? 0) === 1 ? (
-												<span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:text-sky-200">
-													<Star className="h-3 w-3" />
+												<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-rose-500 px-2 py-0.5 text-[11px] font-medium text-white shadow-sm">
+													<Star className="h-3 w-3 fill-white" />
 													官网精选
 												</span>
 											) : null}
@@ -1052,8 +1052,8 @@ export function IndexPage() {
 															</span>
 														) : null}
 														{isFeatured ? (
-															<span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-300">
-																<Star className="h-3.5 w-3.5" />
+															<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-rose-500 px-2 py-0.5 text-xs font-medium text-white shadow-sm">
+																<Star className="h-3.5 w-3.5 fill-white" />
 																官网精选
 															</span>
 														) : null}

@@ -424,8 +424,8 @@ export function PostPage() {
 											</span>
 										) : null}
 										{Number(post.site_featured ?? 0) === 1 ? (
-											<span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:text-sky-200">
-												<Star className="h-3 w-3" />
+											<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-rose-500 px-2 py-0.5 text-[11px] font-medium text-white shadow-sm">
+												<Star className="h-3 w-3 fill-white" />
 												官网精选
 											</span>
 										) : null}
@@ -705,8 +705,8 @@ export function PostPage() {
 																</span>
 															) : null}
 															{Number(c.is_featured ?? 0) === 1 ? (
-																<span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-800 dark:text-sky-200">
-																	<Star className="h-3 w-3" />
+																<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-rose-500 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm">
+																	<Star className="h-3 w-3 fill-white" />
 																	官网精选
 																</span>
 															) : null}
