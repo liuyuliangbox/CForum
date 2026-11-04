@@ -173,3 +173,5 @@ dist
 /publicnode_modules/
 node_modules/
 node_modules/
+
+.idea/
