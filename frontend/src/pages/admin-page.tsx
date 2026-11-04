@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { RefreshCw, Shield, User as UserIcon } from 'lucide-react';
+import { ArrowDown, ArrowUp, RefreshCw, Shield, User as UserIcon } from 'lucide-react';
 
 import { PageShell } from '@/components/page-shell';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,13 @@ export function AdminPage() {
 		notify_on_avatar_change: false,
 		notify_on_manual_verify: false,
 		site_title: 'liuyuliangbox / Project Turn',
-		site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。'
+		site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
+		site_brand: 'liuyuliangbox',
+		project_codename: 'Project Turn',
+		working_title_note: '正式名称待定 / Working Title',
+		site_description: '单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。',
+		forum_link_label: 'bbs.aridjaya.eu.org',
+		footer_rights: '保留所有权利。'
 	});
 
 	const [newCategoryName, setNewCategoryName] = React.useState('');
@@ -83,7 +89,15 @@ export function AdminPage() {
 				notify_on_avatar_change: !!settings.notify_on_avatar_change,
 				notify_on_manual_verify: !!settings.notify_on_manual_verify,
 				site_title: settings.site_title || 'liuyuliangbox / Project Turn',
-				site_tagline: settings.site_tagline || '由 Cloudflare Workers、Pages、D1、R2 提供服务。'
+				site_tagline: settings.site_tagline || '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
+				site_brand: settings.site_brand || 'liuyuliangbox',
+				project_codename: settings.project_codename || 'Project Turn',
+				working_title_note: settings.working_title_note || '正式名称待定 / Working Title',
+				site_description:
+					settings.site_description ||
+					'单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。',
+				forum_link_label: settings.forum_link_label || 'bbs.aridjaya.eu.org',
+				footer_rights: settings.footer_rights || '保留所有权利。'
 			});
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -181,6 +195,34 @@ export function AdminPage() {
 		setError('');
 		try {
 			await apiFetch(`/admin/categories/${id}`, { method: 'DELETE', headers: getSecurityHeaders('DELETE') });
+			await refresh();
+		} catch (e: any) {
+			setError(String(e?.message || e));
+		} finally {
+			setLoading(false);
+		}
+	}
+
+	async function moveCategory(id: number, direction: -1 | 1) {
+		if (!isAdmin) return;
+		const sorted = [...categories].sort(
+			(a, b) => Number(a.sort_order ?? a.id) - Number(b.sort_order ?? b.id) || a.id - b.id
+		);
+		const idx = sorted.findIndex((c) => c.id === id);
+		const swapIdx = idx + direction;
+		if (idx < 0 || swapIdx < 0 || swapIdx >= sorted.length) return;
+		const next = [...sorted];
+		const tmp = next[idx];
+		next[idx] = next[swapIdx];
+		next[swapIdx] = tmp;
+		setLoading(true);
+		setError('');
+		try {
+			await apiFetch('/admin/categories/reorder', {
+				method: 'POST',
+				headers: getSecurityHeaders('POST'),
+				body: JSON.stringify({ ordered_ids: next.map((c) => c.id) })
+			});
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -329,9 +371,10 @@ export function AdminPage() {
 								<CardTitle>站点设置</CardTitle>
 							</CardHeader>
 							<CardContent className="space-y-4">
+								<p className="text-sm text-muted-foreground">论坛顶栏标题（仅论坛站）</p>
 								<div className="grid gap-3 sm:grid-cols-2">
 									<div className="space-y-2">
-										<Label htmlFor="site-title">站点标题</Label>
+										<Label htmlFor="site-title">论坛标题</Label>
 										<Input
 											id="site-title"
 											value={systemSettings.site_title}
@@ -340,12 +383,71 @@ export function AdminPage() {
 										/>
 									</div>
 									<div className="space-y-2">
-										<Label htmlFor="site-tagline">副标题</Label>
+										<Label htmlFor="site-tagline">论坛副标题</Label>
 										<Input
 											id="site-tagline"
 											value={systemSettings.site_tagline}
 											onChange={(e) => setSystemSettings((s) => ({ ...s, site_tagline: e.target.value }))}
 											maxLength={160}
+										/>
+									</div>
+								</div>
+								<Separator />
+								<p className="text-sm font-medium">官网展示</p>
+								<p className="text-xs text-muted-foreground">构建官网时同步；改完后需重建官网生效</p>
+								<div className="grid gap-3 sm:grid-cols-2">
+									<div className="space-y-2">
+										<Label htmlFor="site-brand">品牌名</Label>
+										<Input
+											id="site-brand"
+											value={systemSettings.site_brand}
+											onChange={(e) => setSystemSettings((s) => ({ ...s, site_brand: e.target.value }))}
+											maxLength={80}
+										/>
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="project-codename">项目代号</Label>
+										<Input
+											id="project-codename"
+											value={systemSettings.project_codename}
+											onChange={(e) => setSystemSettings((s) => ({ ...s, project_codename: e.target.value }))}
+											maxLength={80}
+										/>
+									</div>
+									<div className="space-y-2 sm:col-span-2">
+										<Label htmlFor="working-title-note">正式名称说明</Label>
+										<Input
+											id="working-title-note"
+											value={systemSettings.working_title_note}
+											onChange={(e) => setSystemSettings((s) => ({ ...s, working_title_note: e.target.value }))}
+											maxLength={120}
+										/>
+									</div>
+									<div className="space-y-2 sm:col-span-2">
+										<Label htmlFor="site-description">SEO 描述</Label>
+										<Input
+											id="site-description"
+											value={systemSettings.site_description}
+											onChange={(e) => setSystemSettings((s) => ({ ...s, site_description: e.target.value }))}
+											maxLength={300}
+										/>
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="forum-link-label">页脚论坛链接文案</Label>
+										<Input
+											id="forum-link-label"
+											value={systemSettings.forum_link_label}
+											onChange={(e) => setSystemSettings((s) => ({ ...s, forum_link_label: e.target.value }))}
+											maxLength={120}
+										/>
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="footer-rights">版权后缀</Label>
+										<Input
+											id="footer-rights"
+											value={systemSettings.footer_rights}
+											onChange={(e) => setSystemSettings((s) => ({ ...s, footer_rights: e.target.value }))}
+											maxLength={80}
 										/>
 									</div>
 								</div>
@@ -462,7 +564,9 @@ export function AdminPage() {
 									) : null}
 								</div>
 								<div className="space-y-2">
-									{categories.map((c) => (
+									{[...categories]
+										.sort((a, b) => Number(a.sort_order ?? a.id) - Number(b.sort_order ?? b.id) || a.id - b.id)
+										.map((c, idx, arr) => (
 										<div key={c.id} className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
 											{editingCategoryId === c.id ? (
 												<div className="flex w-full flex-col gap-3">
@@ -516,6 +620,9 @@ export function AdminPage() {
 												</div>
 											) : (
 												<span>
+													<span className="mr-2 inline-flex h-5 min-w-5 items-center justify-center rounded bg-muted px-1 text-[10px] text-muted-foreground">
+														{idx + 1}
+													</span>
 													{c.name}
 													{c.admin_only ? (
 														<span className="ml-2 text-xs text-muted-foreground">仅管理员发帖</span>
@@ -554,20 +661,42 @@ export function AdminPage() {
 														</Button>
 													</>
 												) : (
-													<Button
-														variant="outline"
-														size="sm"
-														onClick={() => {
-															setEditingCategoryId(c.id);
-															setEditingCategoryName(c.name);
-															setEditingCategoryAdminOnly(!!c.admin_only);
-															setEditingCategoryShowOnSite(!!c.show_on_site);
-															setEditingCategoryShowOnForum(!(c.show_on_forum === false || c.show_on_forum === 0));
-															setEditingCategorySubtitle(String(c.subtitle || ''));
-														}}
-													>
-														编辑
-													</Button>
+													<>
+														<Button
+															variant="outline"
+															size="sm"
+															disabled={loading || idx === 0}
+															onClick={() => void moveCategory(c.id, -1)}
+															title="上移"
+														>
+															<ArrowUp className="h-4 w-4" />
+															<span className="sr-only">上移</span>
+														</Button>
+														<Button
+															variant="outline"
+															size="sm"
+															disabled={loading || idx === arr.length - 1}
+															onClick={() => void moveCategory(c.id, 1)}
+															title="下移"
+														>
+															<ArrowDown className="h-4 w-4" />
+															<span className="sr-only">下移</span>
+														</Button>
+														<Button
+															variant="outline"
+															size="sm"
+															onClick={() => {
+																setEditingCategoryId(c.id);
+																setEditingCategoryName(c.name);
+																setEditingCategoryAdminOnly(!!c.admin_only);
+																setEditingCategoryShowOnSite(!!c.show_on_site);
+																setEditingCategoryShowOnForum(!(c.show_on_forum === false || c.show_on_forum === 0));
+																setEditingCategorySubtitle(String(c.subtitle || ''));
+															}}
+														>
+															编辑
+														</Button>
+													</>
 												)}
 												<Button variant="destructive" size="sm" onClick={() => deleteCategory(c.id)}>
 													删除

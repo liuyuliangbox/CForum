@@ -123,7 +123,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -260,6 +260,7 @@ export default {
   admin_only INTEGER NOT NULL DEFAULT 0,
   show_on_site INTEGER NOT NULL DEFAULT 0,
   show_on_forum INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`,
 					`CREATE TABLE IF NOT EXISTS posts (
@@ -401,6 +402,37 @@ export default {
 				// column already exists
 			}
 			try {
+				await env.cforum_db.prepare(
+					'ALTER TABLE categories ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0'
+				).run();
+			} catch {
+				// column already exists
+			}
+			try {
+				const needsSortBackfill = await env.cforum_db
+					.prepare(
+						`SELECT COUNT(*) AS c FROM categories
+						 WHERE IFNULL(sort_order, 0) = 0
+						 HAVING COUNT(*) > 1 AND COUNT(*) = SUM(CASE WHEN IFNULL(sort_order, 0) = 0 THEN 1 ELSE 0 END)`
+					)
+					.first<{ c: number }>();
+				if (needsSortBackfill && Number(needsSortBackfill.c) > 0) {
+					const { results: cats } = await env.cforum_db
+						.prepare('SELECT id FROM categories ORDER BY id ASC')
+						.all<{ id: number }>();
+					let i = 0;
+					for (const cat of cats || []) {
+						i += 1;
+						await env.cforum_db
+							.prepare('UPDATE categories SET sort_order = ? WHERE id = ?')
+							.bind(i, cat.id)
+							.run();
+					}
+				}
+			} catch (e) {
+				console.error('Failed to backfill category sort_order', e);
+			}
+			try {
 				await env.cforum_db
 					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_title', 'liuyuliangbox / Project Turn')`)
 					.run();
@@ -409,6 +441,23 @@ export default {
 						`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_tagline', '由 Cloudflare Workers、Pages、D1、R2 提供服务。')`
 					)
 					.run();
+				const siteBrandDefaults: Array<[string, string]> = [
+					['site_brand', 'liuyuliangbox'],
+					['project_codename', 'Project Turn'],
+					['working_title_note', '正式名称待定 / Working Title'],
+					[
+						'site_description',
+						'单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。'
+					],
+					['forum_link_label', 'bbs.aridjaya.eu.org'],
+					['footer_rights', '保留所有权利。']
+				];
+				for (const [key, value] of siteBrandDefaults) {
+					await env.cforum_db
+						.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`)
+						.bind(key, value)
+						.run();
+				}
 			} catch (e) {
 				console.error('Failed to seed brand settings', e);
 			}
@@ -491,6 +540,92 @@ export default {
 				console.error('Failed to seed legacy site logs', e);
 			}
 
+			// One-shot: seed 关于 / 社区规则 / 下载 as site-only single-post categories
+			try {
+				const admin = await env.cforum_db
+					.prepare(`SELECT id FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1`)
+					.first<{ id: number }>();
+				if (admin) {
+					const maxOrder =
+						(
+							await env.cforum_db
+								.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM categories')
+								.first<{ m: number }>()
+						)?.m ?? 0;
+					let nextOrder = maxOrder;
+					const cmsPages: Array<{
+						name: string;
+						subtitle: string;
+						title: string;
+						content: string;
+					}> = [
+						{
+							name: '关于',
+							subtitle: '工作室与项目介绍',
+							title: '关于 liuyuliangbox',
+							content:
+								'我们正在开发一款**单人优先**的回合制 RPG。当前对外代号为 **Project Turn**，正式名称待定 / Working Title。\n\n## 我们在做什么\n\n希望玩家可以按自己的节奏慢慢推进：清晰的回合策略、可读的战斗信息、以及值得反复尝试的构筑空间。多人与联网能力会服务于单人体感，而不是反过来。\n\n## 当前阶段\n\n项目仍在开发中。官网先用于发布开发日志、收集反馈与建立社区习惯。内测与下载通道开放时，会在「下载」栏目与日志中同步说明。\n\n## 技术方向\n\n客户端基于 Unity；在线与账号相关能力规划使用 Nakama。具体功能会随开发日志逐步公开，不会在未就绪时提前承诺上线日期。'
+						},
+						{
+							name: '社区规则',
+							subtitle: '发言约定与讨论入口',
+							title: '社区规则',
+							content:
+								'正式论坛托管在 Cloudflare（CForum）。请先阅读规则，再参与讨论、反馈与建议。\n\n## 发言约定\n\n- 尊重他人：禁止人身攻击、歧视与骚扰。\n- 对事不对人：反馈尽量附带复现步骤、截图或期望行为。\n- 不剧透未公开内容：开发者未发布的剧情与数值请勿外传。\n- 不发布盗版、外挂、破解或恶意链接。\n- 标题写清楚：例如「建议 / Bug / 提问」，方便分类与检索。\n\n## 推荐分类\n\n- 开发进度：官方日志摘要与征集反馈\n- 玩法建议：设计讨论\n- Bug / 体验反馈\n- 美术与氛围讨论\n- 闲聊 / 招募测试\n\n进入论坛：https://bbs.aridjaya.eu.org'
+						},
+						{
+							name: '下载',
+							subtitle: '内测与试玩入口',
+							title: '内测尚未开放',
+							content:
+								'liuyuliangbox / Project Turn 仍在开发中。公开试玩包与内测资格会通过开发日志与社区通知发布。\n\n## 想第一时间知道开放消息？\n\n- 关注官网「开发进度」栏目\n- 加入论坛 https://bbs.aridjaya.eu.org 的「闲聊 / 招募测试」分类'
+						}
+					];
+					for (const page of cmsPages) {
+						let cat = await env.cforum_db
+							.prepare('SELECT id FROM categories WHERE name = ? LIMIT 1')
+							.bind(page.name)
+							.first<{ id: number }>();
+						if (!cat) {
+							nextOrder += 1;
+							const inserted = await env.cforum_db
+								.prepare(
+									`INSERT INTO categories (name, subtitle, admin_only, show_on_site, show_on_forum, sort_order)
+									 VALUES (?, ?, 1, 1, 0, ?)`
+								)
+								.bind(page.name, page.subtitle, nextOrder)
+								.run();
+							cat = { id: Number(inserted.meta?.last_row_id) };
+						} else {
+							await env.cforum_db
+								.prepare(
+									`UPDATE categories
+									 SET show_on_site = 1, admin_only = 1,
+									     subtitle = CASE WHEN IFNULL(subtitle,'') = '' THEN ? ELSE subtitle END
+									 WHERE id = ?`
+								)
+								.bind(page.subtitle, cat.id)
+								.run();
+						}
+						const exists = await env.cforum_db
+							.prepare('SELECT id FROM posts WHERE category_id = ? LIMIT 1')
+							.bind(cat.id)
+							.first();
+						if (!exists) {
+							await env.cforum_db
+								.prepare(
+									`INSERT INTO posts (author_id, title, content, category_id, is_visible)
+									 VALUES (?, ?, ?, ?, 1)`
+								)
+								.bind(admin.id, page.title, page.content, cat.id)
+								.run();
+						}
+					}
+				}
+			} catch (e) {
+				console.error('Failed to seed CMS site pages', e);
+			}
+
 			try {
 				await env.cforum_db
 					.prepare(
@@ -556,7 +691,7 @@ export default {
             '/api/auth/forgot-password', '/api/auth/reset-password', '/api/verify-email-change',
              // Static/Public GETs
             '/api/posts', '/api/categories', '/api/users',
-			'/api/export/site-categories', '/api/export/site-posts'
+			'/api/export/site-categories', '/api/export/site-posts', '/api/export/site-meta'
         ];
         
         // Relax check for public GETs that don't need nonce
@@ -583,7 +718,24 @@ export default {
 			'notify_on_avatar_change',
 			'notify_on_manual_verify'
 		]);
-		const STRING_SETTING_KEYS = new Set(['site_title', 'site_tagline']);
+		const STRING_SETTING_KEYS = new Set([
+			'site_title',
+			'site_tagline',
+			'site_brand',
+			'project_codename',
+			'working_title_note',
+			'site_description',
+			'forum_link_label',
+			'footer_rights'
+		]);
+		const SITE_META_DEFAULTS: Record<string, string> = {
+			site_brand: 'liuyuliangbox',
+			project_codename: 'Project Turn',
+			working_title_note: '正式名称待定 / Working Title',
+			site_description: '单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。',
+			forum_link_label: 'bbs.aridjaya.eu.org',
+			footer_rights: '保留所有权利。'
+		};
 
 		// GET /api/config
 		if (url.pathname === '/api/config' && method === 'GET') {
@@ -628,7 +780,8 @@ export default {
 					notify_on_avatar_change: false,
 					notify_on_manual_verify: false,
 					site_title: 'liuyuliangbox / Project Turn',
-					site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。'
+					site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
+					...SITE_META_DEFAULTS
 				};
 				
 				if (settings.results) {
@@ -656,7 +809,21 @@ export default {
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { turnstile_enabled, notify_on_user_delete, notify_on_username_change, notify_on_avatar_change, notify_on_manual_verify, site_title, site_tagline } = body;
+				const {
+					turnstile_enabled,
+					notify_on_user_delete,
+					notify_on_username_change,
+					notify_on_avatar_change,
+					notify_on_manual_verify,
+					site_title,
+					site_tagline,
+					site_brand,
+					project_codename,
+					working_title_note,
+					site_description,
+					forum_link_label,
+					footer_rights
+				} = body;
 				
 				const stmt = env.cforum_db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
 				const batch = [];
@@ -668,8 +835,15 @@ export default {
 				if (notify_on_manual_verify !== undefined) batch.push(stmt.bind('notify_on_manual_verify', notify_on_manual_verify ? '1' : '0'));
 				if (site_title !== undefined) batch.push(stmt.bind('site_title', String(site_title).slice(0, 80)));
 				if (site_tagline !== undefined) batch.push(stmt.bind('site_tagline', String(site_tagline).slice(0, 160)));
+				if (site_brand !== undefined) batch.push(stmt.bind('site_brand', String(site_brand).slice(0, 80)));
+				if (project_codename !== undefined) batch.push(stmt.bind('project_codename', String(project_codename).slice(0, 80)));
+				if (working_title_note !== undefined) batch.push(stmt.bind('working_title_note', String(working_title_note).slice(0, 120)));
+				if (site_description !== undefined) batch.push(stmt.bind('site_description', String(site_description).slice(0, 300)));
+				if (forum_link_label !== undefined) batch.push(stmt.bind('forum_link_label', String(forum_link_label).slice(0, 120)));
+				if (footer_rights !== undefined) batch.push(stmt.bind('footer_rights', String(footer_rights).slice(0, 80)));
 				
 				if (batch.length > 0) await env.cforum_db.batch(batch);
+				bumpMetaCacheVersion();
 
 				return jsonResponse({ success: true });
 			} catch (e) {
@@ -1290,8 +1464,10 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 							IFNULL(admin_only, 0) AS admin_only,
 							IFNULL(show_on_site, 0) AS show_on_site,
 							IFNULL(show_on_forum, 1) AS show_on_forum,
+							IFNULL(sort_order, 0) AS sort_order,
 							created_at
-						 FROM categories ORDER BY created_at ASC`
+						 FROM categories
+						 ORDER BY IFNULL(sort_order, 0) ASC, id ASC`
 					)
 					.all();
 				return jsonResponse(
@@ -1300,9 +1476,27 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						subtitle: String(row.subtitle || ''),
 						admin_only: Number(row.admin_only) === 1,
 						show_on_site: Number(row.show_on_site) === 1,
-						show_on_forum: Number(row.show_on_forum) === 1
+						show_on_forum: Number(row.show_on_forum) === 1,
+						sort_order: Number(row.sort_order || 0)
 					}))
 				);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/export/site-meta — public brand copy for official site builds
+		if (url.pathname === '/api/export/site-meta' && method === 'GET') {
+			try {
+				const settings = await env.cforum_db.prepare('SELECT key, value FROM settings').all();
+				const meta: Record<string, string> = { ...SITE_META_DEFAULTS };
+				for (const row of settings.results || []) {
+					const key = String((row as any).key || '');
+					if (key in SITE_META_DEFAULTS) {
+						meta[key] = String((row as any).value ?? meta[key]);
+					}
+				}
+				return jsonResponse(meta);
 			} catch (e) {
 				return handleError(e);
 			}
@@ -1313,15 +1507,18 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			try {
 				const { results } = await env.cforum_db
 					.prepare(
-						`SELECT id, name, IFNULL(subtitle, '') AS subtitle, created_at FROM categories
+						`SELECT id, name, IFNULL(subtitle, '') AS subtitle,
+							IFNULL(sort_order, 0) AS sort_order, created_at
+						 FROM categories
 						 WHERE IFNULL(show_on_site, 0) = 1
-						 ORDER BY created_at ASC`
+						 ORDER BY IFNULL(sort_order, 0) ASC, id ASC`
 					)
 					.all();
 				return jsonResponse(
 					(results || []).map((row: any) => ({
 						...row,
-						subtitle: String(row.subtitle || '')
+						subtitle: String(row.subtitle || ''),
+						sort_order: Number(row.sort_order || 0)
 					}))
 				);
 			} catch (e) {
@@ -1454,24 +1651,34 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const { name, admin_only, show_on_site, show_on_forum, subtitle } = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				const subtitleValue = show_on_site ? String(subtitle || '').trim().slice(0, 200) : '';
+				const maxOrder =
+					(
+						await env.cforum_db
+							.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM categories')
+							.first<{ m: number }>()
+					)?.m ?? 0;
+				const sortOrder = maxOrder + 1;
 				
 				const { success } = await env.cforum_db
 					.prepare(
-						'INSERT INTO categories (name, subtitle, admin_only, show_on_site, show_on_forum) VALUES (?, ?, ?, ?, ?)'
+						'INSERT INTO categories (name, subtitle, admin_only, show_on_site, show_on_forum, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
 					)
 					.bind(
 						name,
 						subtitleValue,
 						admin_only ? 1 : 0,
 						show_on_site ? 1 : 0,
-						show_on_forum === false || show_on_forum === 0 ? 0 : 1
+						show_on_forum === false || show_on_forum === 0 ? 0 : 1,
+						sortOrder
 					)
 					.run();
+				bumpMetaCacheVersion();
 				await security.logAudit(userPayload.id, 'CREATE_CATEGORY', 'category', name, {
 					admin_only: !!admin_only,
 					show_on_site: !!show_on_site,
 					show_on_forum: !(show_on_forum === false || show_on_forum === 0),
-					subtitle: subtitleValue
+					subtitle: subtitleValue,
+					sort_order: sortOrder
 				}, request);
 				return jsonResponse({ success });
 			} catch (e) {
@@ -1504,6 +1711,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						id
 					)
 					.run();
+				bumpMetaCacheVersion();
 				await security.logAudit(userPayload.id, 'UPDATE_CATEGORY', 'category', id, {
 					name,
 					admin_only: !!admin_only,
@@ -1511,6 +1719,27 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					show_on_forum: !(show_on_forum === false || show_on_forum === 0),
 					subtitle: subtitleValue
 				}, request);
+				return jsonResponse({ success: true });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/admin/categories/reorder — body: { ordered_ids: number[] }
+		if (url.pathname === '/api/admin/categories/reorder' && method === 'POST') {
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const body = (await request.json()) as any;
+				const orderedIds = Array.isArray(body?.ordered_ids)
+					? body.ordered_ids.map((x: any) => Number(x)).filter((n: number) => Number.isFinite(n) && n > 0)
+					: [];
+				if (!orderedIds.length) return jsonResponse({ error: 'Missing ordered_ids' }, 400);
+				const stmt = env.cforum_db.prepare('UPDATE categories SET sort_order = ? WHERE id = ?');
+				const batch = orderedIds.map((id: number, idx: number) => stmt.bind(idx + 1, id));
+				await env.cforum_db.batch(batch);
+				bumpMetaCacheVersion();
+				await security.logAudit(userPayload.id, 'REORDER_CATEGORIES', 'category', 'all', { ordered_ids: orderedIds }, request);
 				return jsonResponse({ success: true });
 			} catch (e) {
 				return handleError(e);
@@ -1586,6 +1815,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				}
 				
 				await env.cforum_db.prepare('DELETE FROM categories WHERE id = ?').bind(id).run();
+				bumpMetaCacheVersion();
 				await security.logAudit(userPayload.id, 'DELETE_CATEGORY', 'category', id, {}, request);
 				return jsonResponse({ success: true });
 			} catch (e) {
