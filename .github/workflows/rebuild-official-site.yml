@@ -1,0 +1,61 @@
+name: Rebuild Official Site
+
+# Uses this repo's Cloudflare secrets to rebuild Gaming-Community
+# (daily sync of forum export → static /logs).
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    name: Sync forum + deploy game site
+    steps:
+      - name: Checkout Gaming-Community
+        uses: actions/checkout@v4
+        with:
+          repository: liuyuliangbox/Gaming-Community
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install and build
+        env:
+          FORUM_API_BASE: https://bbs.aridjaya.eu.org
+        run: |
+          npm ci
+          npm run build
+
+      - name: Resolve Pages project name
+        id: pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          NAME=$(npx wrangler pages project list 2>/dev/null | node -e '
+            let i=""; process.stdin.on("data",c=>i+=c); process.stdin.on("end",()=>{
+              const lines=i.split(/\r?\n/);
+              const hit=lines.find(l=>/gaming-community|Gaming-Community|game/i.test(l));
+              if(hit){
+                const m=hit.trim().split(/\s+/);
+                process.stdout.write(m[0]||"");
+              }
+            });
+          ')
+          if [ -z "$NAME" ]; then
+            NAME="gaming-community"
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "Using Pages project: $NAME"
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=${{ steps.pages.outputs.name }}
