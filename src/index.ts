@@ -379,6 +379,12 @@ export default {
 						.prepare(`UPDATE categories SET show_on_site = 1 WHERE name = '开发进度'`)
 						.run();
 				}
+				await env.cforum_db
+					.prepare(
+						`UPDATE categories SET subtitle = '进度同步自论坛公开栏目，构建时生成静态页。'
+						 WHERE name = '开发进度' AND IFNULL(subtitle, '') = ''`
+					)
+					.run();
 			} catch (e) {
 				console.error('Failed to seed game categories', e);
 			}
