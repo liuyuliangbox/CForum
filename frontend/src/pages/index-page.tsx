@@ -895,11 +895,11 @@ export function IndexPage() {
 							return (
 								<Card
 									key={p.id}
-									className="group relative overflow-hidden transition hover:border-foreground/25 hover:shadow-sm"
+									className="group relative transition hover:border-foreground/25 hover:shadow-sm"
 								>
 									<a
 										href={`/post?id=${p.id}`}
-										className="absolute inset-0 z-0"
+										className="absolute inset-0 z-0 rounded-xl"
 										aria-label={`查看帖子：${p.title}`}
 									/>
 									<CardContent className="relative z-10 py-5 pointer-events-none">
@@ -925,7 +925,7 @@ export function IndexPage() {
 														<span className="truncate text-lg font-semibold group-hover:underline">{p.title}</span>
 													</div>
 													{isAdmin ? (
-														<div className="relative pointer-events-auto">
+														<div className="relative z-20 pointer-events-auto">
 															<Button
 																type="button"
 																variant="ghost"
@@ -946,7 +946,7 @@ export function IndexPage() {
 															</Button>
 															{menuOpen ? (
 																<div
-																	className="absolute right-0 top-full z-50 mt-1 w-40 rounded-md border bg-background p-1 shadow-md"
+																	className="absolute right-0 top-full z-[60] mt-1 w-44 rounded-md border bg-background p-1 shadow-lg"
 																	onMouseDown={(e) => e.stopPropagation()}
 																	onTouchStart={(e) => e.stopPropagation()}
 																	onClick={(e) => e.stopPropagation()}
