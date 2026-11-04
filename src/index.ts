@@ -1352,7 +1352,35 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (dualShown && Number((post as any).site_featured ?? 0) !== 1) {
 					return jsonResponse({ error: 'Post not found' }, 404);
 				}
-				return jsonResponse(post);
+
+				const { results: featuredComments } = await env.cforum_db
+					.prepare(
+						`SELECT
+							comments.id,
+							comments.content,
+							comments.created_at,
+							users.username AS author_name,
+							users.avatar_url AS author_avatar
+						 FROM comments
+						 JOIN users ON comments.author_id = users.id
+						 WHERE comments.post_id = ?
+						   AND comments.parent_id IS NULL
+						   AND IFNULL(comments.is_featured, 0) = 1
+						 ORDER BY comments.created_at ASC`
+					)
+					.bind(postId)
+					.all();
+
+				return jsonResponse({
+					...post,
+					featured_comments: (featuredComments || []).map((row: any) => ({
+						id: row.id,
+						content: row.content,
+						created_at: row.created_at,
+						author_name: row.author_name,
+						author_avatar: row.author_avatar || null
+					}))
+				});
 			} catch (e) {
 				return handleError(e);
 			}

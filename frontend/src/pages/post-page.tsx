@@ -339,7 +339,7 @@ export function PostPage() {
 				headers: getSecurityHeaders('POST'),
 				body: JSON.stringify({ featured: !currentlyFeatured })
 			});
-			alert(!currentlyFeatured ? '已设为评论精选' : '已取消评论精选');
+			alert(!currentlyFeatured ? '已设为官网精选评论' : '已取消官网精选评论');
 			await refresh();
 		} catch (e: any) {
 			alert(String(e?.message || e));
@@ -707,7 +707,7 @@ export function PostPage() {
 															{Number(c.is_featured ?? 0) === 1 ? (
 																<span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-800 dark:text-sky-200">
 																	<Star className="h-3 w-3" />
-																	精选
+																	官网精选
 																</span>
 															) : null}
 															<span className="text-muted-foreground">{formatDate(c.created_at)}</span>
@@ -723,11 +723,11 @@ export function PostPage() {
 																variant="ghost"
 																size="sm"
 																onClick={() => void toggleCommentFeature(c.id, Number(c.is_featured ?? 0) === 1)}
-																title={Number(c.is_featured ?? 0) === 1 ? '取消精选' : '设为精选'}
+																title={Number(c.is_featured ?? 0) === 1 ? '取消官网精选' : '设为官网精选'}
 															>
 																<Star className={`h-4 w-4 ${Number(c.is_featured ?? 0) === 1 ? 'fill-sky-500 text-sky-600' : ''}`} />
 																<span className="sr-only">
-																	{Number(c.is_featured ?? 0) === 1 ? '取消精选' : '设为精选'}
+																	{Number(c.is_featured ?? 0) === 1 ? '取消官网精选' : '设为官网精选'}
 																</span>
 															</Button>
 														) : null}
