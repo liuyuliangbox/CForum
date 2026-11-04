@@ -111,8 +111,10 @@ export function PostPage() {
 		try {
 			const userParam = userId ? `?user_id=${userId}` : '';
 			const authHeaders = getSecurityHeaders('GET', null);
-			const p = await apiFetch<Post>(`/posts/${postId}${userParam}`, { headers: authHeaders });
-			const cs = await apiFetch<Comment[]>(`/posts/${postId}/comments`, { headers: authHeaders });
+			const [p, cs] = await Promise.all([
+				apiFetch<Post>(`/posts/${postId}${userParam}`, { headers: authHeaders }),
+				apiFetch<Comment[]>(`/posts/${postId}/comments`, { headers: authHeaders })
+			]);
 			setPost(p);
 			setComments(cs);
 			setEditTitle(p.title);

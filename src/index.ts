@@ -122,6 +122,10 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 	return outcome.success;
 }
 
+/** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
+const SCHEMA_VERSION = 7;
+let schemaReadyInIsolate = false;
+
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
@@ -204,14 +208,15 @@ export default {
 		}
 
 		// Ensure the database schema exists before anything else.
-		// Hot path: one settings read. Full CREATE/ALTER/seed only when schema_version lags.
-		const SCHEMA_VERSION = 7;
+		// Hot path: isolate memory → else one settings read → else full CREATE/ALTER/seed.
 		const ensureSchema = async () => {
+			if (schemaReadyInIsolate) return;
 			try {
 				const ver = await env.cforum_db
 					.prepare(`SELECT value FROM settings WHERE key = 'schema_version'`)
 					.first<{ value: string }>();
 				if (ver && Number(ver.value) === SCHEMA_VERSION) {
+					schemaReadyInIsolate = true;
 					return;
 				}
 			} catch {
@@ -494,6 +499,7 @@ export default {
 					)
 					.bind(String(SCHEMA_VERSION))
 					.run();
+				schemaReadyInIsolate = true;
 			} catch (e) {
 				console.error('Failed to persist schema_version', e);
 			}
@@ -2441,15 +2447,25 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			const postId = url.pathname.split('/')[3];
 			try {
 				const { results } = await env.cforum_db.prepare(
-					`SELECT comments.*, users.username, users.avatar_url, users.role 
+					`SELECT
+						comments.id,
+						comments.post_id,
+						comments.parent_id,
+						comments.author_id,
+						comments.content,
+						comments.is_featured,
+						comments.created_at,
+						users.username,
+						users.avatar_url,
+						users.role
                      FROM comments 
                      JOIN users ON comments.author_id = users.id 
-                     WHERE post_id = ? 
+                     WHERE comments.post_id = ? 
                      ORDER BY
                        CASE WHEN comments.parent_id IS NULL AND IFNULL(comments.is_featured, 0) = 1 THEN 0 ELSE 1 END ASC,
                        comments.created_at ASC`
 				).bind(postId).all();
-				return jsonResponse(results);
+				return jsonResponse(results || []);
 			} catch (e) {
 				return handleError(e);
 			}
