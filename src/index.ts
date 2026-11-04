@@ -233,6 +233,7 @@ export default {
   category_id INTEGER,
   is_pinned INTEGER DEFAULT 0,
   is_visible INTEGER NOT NULL DEFAULT 1,
+  site_featured INTEGER NOT NULL DEFAULT 0,
   view_count INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (author_id) REFERENCES users(id),
@@ -244,6 +245,7 @@ export default {
   parent_id INTEGER,
   author_id INTEGER NOT NULL,
   content TEXT NOT NULL,
+  is_featured INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (post_id) REFERENCES posts(id),
   FOREIGN KEY (parent_id) REFERENCES comments(id),
@@ -328,6 +330,20 @@ export default {
 			try {
 				await env.cforum_db.prepare(
 					'ALTER TABLE posts ADD COLUMN is_visible INTEGER NOT NULL DEFAULT 1'
+				).run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db.prepare(
+					'ALTER TABLE posts ADD COLUMN site_featured INTEGER NOT NULL DEFAULT 0'
+				).run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db.prepare(
+					'ALTER TABLE comments ADD COLUMN is_featured INTEGER NOT NULL DEFAULT 0'
 				).run();
 			} catch {
 				// column already exists
@@ -1262,15 +1278,21 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const offset = Math.max(parseInt(url.searchParams.get('offset') || '0', 10) || 0, 0);
 				const categoryId = url.searchParams.get('category_id');
 
+				// 仅官网展示：全部可见帖；同时论坛+官网展示：需官网精选
 				let query = `SELECT
 						posts.id, posts.title, posts.content, posts.category_id, posts.created_at, posts.is_pinned,
+						posts.site_featured,
 						categories.name as category_name,
 						users.username as author_name
 					FROM posts
 					JOIN users ON posts.author_id = users.id
 					JOIN categories ON posts.category_id = categories.id
 					WHERE IFNULL(categories.show_on_site, 0) = 1
-					  AND IFNULL(posts.is_visible, 1) = 1`;
+					  AND IFNULL(posts.is_visible, 1) = 1
+					  AND (
+						IFNULL(categories.show_on_forum, 1) = 0
+						OR IFNULL(posts.site_featured, 0) = 1
+					  )`;
 				const params: any[] = [];
 				if (categoryId) {
 					query += ` AND posts.category_id = ?`;
@@ -1313,7 +1335,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					.prepare(
 						`SELECT
 							posts.id, posts.title, posts.content, posts.category_id, posts.created_at, posts.is_pinned,
+							posts.site_featured,
 							categories.name as category_name,
+							IFNULL(categories.show_on_forum, 1) AS show_on_forum,
 							users.username as author_name
 						 FROM posts
 						 JOIN users ON posts.author_id = users.id
@@ -1324,6 +1348,10 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					.bind(postId)
 					.first();
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
+				const dualShown = Number((post as any).show_on_forum ?? 1) === 1;
+				if (dualShown && Number((post as any).site_featured ?? 0) !== 1) {
+					return jsonResponse({ error: 'Post not found' }, 404);
+				}
 				return jsonResponse(post);
 			} catch (e) {
 				return handleError(e);
@@ -1719,13 +1747,11 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const body = await request.json() as any;
 				const { category_id } = body;
 				
-				// Validate category exists if provided
-				if (category_id) {
-					const category = await env.cforum_db.prepare('SELECT id FROM categories WHERE id = ?').bind(category_id).first();
-					if (!category) return jsonResponse({ error: 'Category not found' }, 404);
-				}
+				if (!category_id) return jsonResponse({ error: '请选择分类' }, 400);
+				const category = await env.cforum_db.prepare('SELECT id FROM categories WHERE id = ?').bind(category_id).first();
+				if (!category) return jsonResponse({ error: 'Category not found' }, 404);
 
-				await env.cforum_db.prepare('UPDATE posts SET category_id = ? WHERE id = ?').bind(category_id || null, id).run();
+				await env.cforum_db.prepare('UPDATE posts SET category_id = ? WHERE id = ?').bind(category_id, id).run();
 				
 				await security.logAudit(userPayload.id, 'ADMIN_MOVE_POST', 'post', id, { category_id }, request);
 				return jsonResponse({ success: true });
@@ -1968,6 +1994,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const limit = parseInt(url.searchParams.get('limit') || '20');
 				const offset = parseInt(url.searchParams.get('offset') || '0');
 				const categoryId = url.searchParams.get('category_id');
+				const siteFeaturedOnly =
+					url.searchParams.get('site_featured') === '1' ||
+					url.searchParams.get('site_featured') === 'true';
 				const q = (url.searchParams.get('q') || url.searchParams.get('query') || '').trim();
 				const sortByRaw = (url.searchParams.get('sort_by') || 'time').trim().toLowerCase();
 				const sortDirRaw = (url.searchParams.get('sort_dir') || 'desc').trim().toLowerCase();
@@ -1992,20 +2021,20 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const conditions: string[] = [];
 
                 if (categoryId) {
-                    if (categoryId === 'uncategorized') {
-						conditions.push(`posts.category_id IS NULL`);
-                    } else {
-						conditions.push(`posts.category_id = ?`);
-                        params.push(categoryId);
-                        countParams.push(categoryId);
-						// Non-admins cannot open forum-hidden categories via API
-						if (!isAdmin) {
-							conditions.push(`IFNULL(categories.show_on_forum, 1) = 1`);
-						}
-                    }
+					conditions.push(`posts.category_id = ?`);
+					params.push(categoryId);
+					countParams.push(categoryId);
+					// Non-admins cannot open forum-hidden categories via API
+					if (!isAdmin) {
+						conditions.push(`IFNULL(categories.show_on_forum, 1) = 1`);
+					}
                 } else if (!isAdmin) {
 					// Hide forum-hidden category posts from the default feed (admins see all)
-					conditions.push(`(posts.category_id IS NULL OR IFNULL(categories.show_on_forum, 1) = 1)`);
+					conditions.push(`IFNULL(categories.show_on_forum, 1) = 1`);
+				}
+
+				if (siteFeaturedOnly) {
+					conditions.push(`IFNULL(posts.site_featured, 0) = 1`);
 				}
 
 				// Visibility: guests see public only; authors see own hidden; admins see all
@@ -2111,7 +2140,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			}
 		}
 
-		// POST /api/posts/:id/visibility — author or admin
+		// POST /api/posts/:id/visibility — author can hide only; admin can hide/show
 		if (url.pathname.match(/^\/api\/posts\/\d+\/visibility$/) && method === 'POST') {
 			const postId = url.pathname.split('/')[3];
 			try {
@@ -2119,12 +2148,24 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const body = (await request.json()) as any;
 				const visible = !(body?.visible === false || body?.visible === 0);
 				const post = await env.cforum_db
-					.prepare('SELECT id, author_id FROM posts WHERE id = ?')
+					.prepare(
+						'SELECT id, author_id, IFNULL(site_featured, 0) AS site_featured FROM posts WHERE id = ?'
+					)
 					.bind(postId)
-					.first<{ id: number; author_id: number }>();
+					.first<{ id: number; author_id: number; site_featured: number }>();
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
-				if (post.author_id !== userPayload.id && userPayload.role !== 'admin') {
+				const isAdmin = userPayload.role === 'admin';
+				const isAuthor = post.author_id === userPayload.id;
+				if (!isAdmin && !isAuthor) {
 					return jsonResponse({ error: 'Unauthorized' }, 403);
+				}
+				if (!isAdmin) {
+					if (visible) {
+						return jsonResponse({ error: '隐藏后不可再设为可见，请联系管理员' }, 403);
+					}
+					if (Number(post.site_featured) === 1) {
+						return jsonResponse({ error: '官网精选帖不可由作者隐藏' }, 403);
+					}
 				}
 				await env.cforum_db
 					.prepare('UPDATE posts SET is_visible = ? WHERE id = ?')
@@ -2139,6 +2180,34 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					request
 				);
 				return jsonResponse({ success: true, is_visible: visible ? 1 : 0 });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/admin/posts/:id/site-feature — admin only 官网精选
+		if (url.pathname.match(/^\/api\/admin\/posts\/\d+\/site-feature$/) && method === 'POST') {
+			const postId = url.pathname.split('/')[4];
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const body = (await request.json()) as any;
+				const featured = !(body?.featured === false || body?.featured === 0);
+				const post = await env.cforum_db.prepare('SELECT id FROM posts WHERE id = ?').bind(postId).first();
+				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
+				await env.cforum_db
+					.prepare('UPDATE posts SET site_featured = ? WHERE id = ?')
+					.bind(featured ? 1 : 0, postId)
+					.run();
+				await security.logAudit(
+					userPayload.id,
+					'ADMIN_SITE_FEATURE_POST',
+					'post',
+					postId,
+					{ featured },
+					request
+				);
+				return jsonResponse({ success: true, site_featured: featured ? 1 : 0 });
 			} catch (e) {
 				return handleError(e);
 			}
@@ -2161,12 +2230,25 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (hasInvisibleCharacters(title) || hasInvisibleCharacters(content)) return jsonResponse({ error: 'Title or content contains invalid invisible characters' }, 400);
 
 				// Check ownership or admin
-				const post = await env.cforum_db.prepare('SELECT author_id FROM posts WHERE id = ?').bind(postId).first();
+				const post = await env.cforum_db
+					.prepare(
+						'SELECT author_id, IFNULL(is_visible, 1) AS is_visible FROM posts WHERE id = ?'
+					)
+					.bind(postId)
+					.first<any>();
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
 
+				const isAdmin = userPayload.role === 'admin';
 				// Use userPayload for RBAC
-				if (post.author_id !== userPayload.id && userPayload.role !== 'admin') {
+				if (post.author_id !== userPayload.id && !isAdmin) {
 					return jsonResponse({ error: 'Unauthorized' }, 403);
+				}
+				// 可见帖作者不可再编辑（管理员可）
+				if (!isAdmin && Number(post.is_visible) === 1) {
+					return jsonResponse({ error: '可见帖不可再编辑，可隐藏或联系管理员' }, 403);
+				}
+				if (!category_id) {
+					return jsonResponse({ error: '请选择分类' }, 400);
 				}
 
 				// Validate Lengths
@@ -2175,20 +2257,18 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (hasControlCharacters(title) || hasControlCharacters(content)) return jsonResponse({ error: 'Title or content contains invalid control characters' }, 400);
 
 				// Validate Category + announcement restriction
-				if (category_id) {
-					const category = await env.cforum_db
-						.prepare('SELECT id, admin_only FROM categories WHERE id = ?')
-						.bind(category_id)
-						.first<any>();
-					if (!category) return jsonResponse({ error: 'Category not found' }, 400);
-					if (category.admin_only && userPayload.role !== 'admin') {
-						return jsonResponse({ error: '该分类仅管理员可发帖' }, 403);
-					}
+				const category = await env.cforum_db
+					.prepare('SELECT id, admin_only FROM categories WHERE id = ?')
+					.bind(category_id)
+					.first<any>();
+				if (!category) return jsonResponse({ error: 'Category not found' }, 400);
+				if (category.admin_only && userPayload.role !== 'admin') {
+					return jsonResponse({ error: '该分类仅管理员可发帖' }, 403);
 				}
 
 				await env.cforum_db.prepare(
 					'UPDATE posts SET title = ?, content = ?, category_id = ? WHERE id = ?'
-				).bind(title.trim(), content.trim(), category_id || null, postId).run();
+				).bind(title.trim(), content.trim(), category_id, postId).run();
 				
 				await security.logAudit(userPayload.id, 'UPDATE_POST', 'post', postId, { title_length: title.length }, request);
 
@@ -2205,11 +2285,19 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const userPayload = await authenticate(request);
 				
 				// Check ownership
-				const post = await env.cforum_db.prepare('SELECT author_id, content FROM posts WHERE id = ?').bind(id).first();
+				const post = await env.cforum_db
+					.prepare(
+						'SELECT author_id, content, IFNULL(site_featured, 0) AS site_featured FROM posts WHERE id = ?'
+					)
+					.bind(id)
+					.first<any>();
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
 				
 				if (post.author_id !== userPayload.id) {
 					return jsonResponse({ error: 'Unauthorized' }, 403);
+				}
+				if (Number(post.site_featured) === 1) {
+					return jsonResponse({ error: '官网精选帖不可由作者删除' }, 403);
 				}
 
 				// Delete images in post
@@ -2229,7 +2317,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			}
 		}
 
-		// GET /api/posts/:id/comments
+		// GET /api/posts/:id/comments （一级精选优先）
 		if (url.pathname.match(/^\/api\/posts\/\d+\/comments$/) && method === 'GET') {
 			const postId = url.pathname.split('/')[3];
 			try {
@@ -2238,7 +2326,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
                      FROM comments 
                      JOIN users ON comments.author_id = users.id 
                      WHERE post_id = ? 
-                     ORDER BY created_at ASC`
+                     ORDER BY
+                       CASE WHEN comments.parent_id IS NULL AND IFNULL(comments.is_featured, 0) = 1 THEN 0 ELSE 1 END ASC,
+                       comments.created_at ASC`
 				).bind(postId).all();
 				return jsonResponse(results);
 			} catch (e) {
@@ -2303,6 +2393,40 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				);
 
 				return jsonResponse({ success, id: meta?.last_row_id ?? null }, 201);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/admin/comments/:id/feature — admin only, 仅一级评论
+		if (url.pathname.match(/^\/api\/admin\/comments\/\d+\/feature$/) && method === 'POST') {
+			const id = url.pathname.split('/')[4];
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const body = (await request.json()) as any;
+				const featured = !(body?.featured === false || body?.featured === 0);
+				const comment = await env.cforum_db
+					.prepare('SELECT id, parent_id FROM comments WHERE id = ?')
+					.bind(id)
+					.first<{ id: number; parent_id: number | null }>();
+				if (!comment) return jsonResponse({ error: 'Comment not found' }, 404);
+				if (comment.parent_id != null) {
+					return jsonResponse({ error: '仅一级评论可精选' }, 400);
+				}
+				await env.cforum_db
+					.prepare('UPDATE comments SET is_featured = ? WHERE id = ?')
+					.bind(featured ? 1 : 0, id)
+					.run();
+				await security.logAudit(
+					userPayload.id,
+					'ADMIN_FEATURE_COMMENT',
+					'comment',
+					id,
+					{ featured },
+					request
+				);
+				return jsonResponse({ success: true, is_featured: featured ? 1 : 0 });
 			} catch (e) {
 				return handleError(e);
 			}
@@ -2387,10 +2511,14 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				}
 
 				const { title, content: rawContent, category_id } = body;
+				const isVisible = !(body?.is_visible === false || body?.is_visible === 0 || body?.visible === false || body?.visible === 0);
 				let content = rawContent;
 				
 				if (!title || !content) {
 					return jsonResponse({ error: 'Missing title or content' }, 400);
+				}
+				if (!category_id) {
+					return jsonResponse({ error: '请选择分类' }, 400);
 				}
 				
 				// --- Input Sanitization & Validation (Sync with Frontend) ---
@@ -2421,22 +2549,23 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					.replace(/'/g, '&#039;');
 
 				// Validate Category + announcement restriction
-				if (category_id) {
-					const category = await env.cforum_db
-						.prepare('SELECT id, admin_only FROM categories WHERE id = ?')
-						.bind(category_id)
-						.first<any>();
-					if (!category) return jsonResponse({ error: 'Category not found' }, 400);
-					if (category.admin_only && userPayload.role !== 'admin') {
-						return jsonResponse({ error: '该分类仅管理员可发帖' }, 403);
-					}
+				const category = await env.cforum_db
+					.prepare('SELECT id, admin_only FROM categories WHERE id = ?')
+					.bind(category_id)
+					.first<any>();
+				if (!category) return jsonResponse({ error: 'Category not found' }, 400);
+				if (category.admin_only && userPayload.role !== 'admin') {
+					return jsonResponse({ error: '该分类仅管理员可发帖' }, 403);
 				}
 
 				const { success } = await env.cforum_db.prepare(
-					'INSERT INTO posts (author_id, title, content, category_id) VALUES (?, ?, ?, ?)'
-				).bind(userPayload.id, safeTitle.trim(), content.trim(), category_id || null).run();
+					'INSERT INTO posts (author_id, title, content, category_id, is_visible) VALUES (?, ?, ?, ?, ?)'
+				).bind(userPayload.id, safeTitle.trim(), content.trim(), category_id, isVisible ? 1 : 0).run();
 				
-				await security.logAudit(userPayload.id, 'CREATE_POST', 'post', 'new', { title_length: safeTitle.length }, request);
+				await security.logAudit(userPayload.id, 'CREATE_POST', 'post', 'new', {
+					title_length: safeTitle.length,
+					is_visible: isVisible
+				}, request);
 
 				return jsonResponse({ success }, 201);
 			} catch (e) {

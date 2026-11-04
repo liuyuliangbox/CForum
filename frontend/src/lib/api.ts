@@ -28,8 +28,10 @@ export type Post = {
 	category_id: number | null;
 	category_name?: string | null;
 	is_pinned?: number;
-	/** 1=可见（默认），0=隐藏；作者与管理员可切换；官网同步仅取可见帖 */
+	/** 1=可见（默认），0=隐藏；作者仅可隐藏且不可再显示；官网同步仅取可见帖 */
 	is_visible?: number;
+	/** 1=官网精选（仅 admin）；精选后作者不可隐藏/删除 */
+	site_featured?: number;
 	view_count?: number;
 	created_at: string;
 	author_name?: string;
@@ -49,6 +51,8 @@ export type Comment = {
 	avatar_url?: string | null;
 	role?: 'admin' | 'user';
 	content: string;
+	/** 1=评论精选（仅一级评论，admin） */
+	is_featured?: number;
 	created_at: string;
 };
 

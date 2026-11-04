@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, EyeOff, Heart, MessageCircle, MoreVertical, Pin, RefreshCw, Search, Shield, Trash2, User, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, EyeOff, Heart, MessageCircle, MoreVertical, Pin, RefreshCw, Search, Shield, Star, Trash2, User, X } from 'lucide-react';
 
 import { TurnstileWidget } from '@/components/turnstile';
 import { PageShell } from '@/components/page-shell';
@@ -21,6 +21,7 @@ export function IndexPage() {
 	const [banner, setBanner] = React.useState<string>('');
 	const [categories, setCategories] = React.useState<Category[]>([]);
 	const [selectedCategory, setSelectedCategory] = React.useState<string>('');
+	const [siteFeaturedOnly, setSiteFeaturedOnly] = React.useState(false);
 	const [searchInput, setSearchInput] = React.useState<string>('');
 	const [searchQuery, setSearchQuery] = React.useState<string>('');
 	const [posts, setPosts] = React.useState<Post[]>([]);
@@ -34,6 +35,7 @@ export function IndexPage() {
 	const [newTitle, setNewTitle] = React.useState('');
 	const [newContent, setNewContent] = React.useState('');
 	const [newCategoryId, setNewCategoryId] = React.useState<string>('');
+	const [newVisible, setNewVisible] = React.useState(true);
 	const [previewOpen, setPreviewOpen] = React.useState(() =>
 		typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : false
 	);
@@ -311,12 +313,14 @@ export function IndexPage() {
 								: 'time';
 				const sortDir = sortOption === 'time_asc' ? 'asc' : 'desc';
 				const categoryParam = selectedCategory ? `&category_id=${encodeURIComponent(selectedCategory)}` : '';
+				const featuredParam = siteFeaturedOnly ? '&site_featured=1' : '';
 				const searchParam = searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : '';
 				const sortParam = `&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}`;
 				const headers = getSecurityHeaders('GET', null);
-				const res = await fetch(`/api/posts?limit=${pageLimit}&offset=${offset}${categoryParam}${searchParam}${sortParam}`, {
-					headers
-				});
+				const res = await fetch(
+					`/api/posts?limit=${pageLimit}&offset=${offset}${categoryParam}${featuredParam}${searchParam}${sortParam}`,
+					{ headers }
+				);
 				if (!res.ok) {
 					let msg = `加载帖子失败 (${res.status})`;
 					try {
@@ -344,7 +348,7 @@ export function IndexPage() {
 				setLoading(false);
 			}
 		},
-		[selectedCategory, searchQuery, sortOption, token]
+		[selectedCategory, siteFeaturedOnly, searchQuery, sortOption, token]
 	);
 
 	React.useEffect(() => {
@@ -418,43 +422,91 @@ export function IndexPage() {
 
 	async function togglePostVisibility(post: Post) {
 		if (!user) return;
-		if (user.role !== 'admin' && user.id !== post.author_id) return;
+		const isAdmin = user.role === 'admin';
+		const isOwner = user.id === post.author_id;
+		if (!isAdmin && !isOwner) return;
+		const nextVisible = !(Number(post.is_visible ?? 1) === 1);
+		if (!isAdmin && Number(post.site_featured ?? 0) === 1 && !nextVisible) {
+			alert('官网精选帖不可由作者隐藏');
+			return;
+		}
+		if (!isAdmin && nextVisible) {
+			alert('隐藏后不可再设为可见，请联系管理员');
+			return;
+		}
+		if (!nextVisible) {
+			const ok = confirm(
+				isAdmin
+					? '确定隐藏这篇帖子吗？'
+					: '确定隐藏这篇帖子吗？隐藏后将不可再设置为可见，仅管理员可恢复。'
+			);
+			if (!ok) return;
+		}
 		setAdminActionPostId(post.id);
 		try {
-			const nextVisible = !(Number(post.is_visible ?? 1) === 1);
 			await apiFetch(`/posts/${post.id}/visibility`, {
 				method: 'POST',
 				headers: getSecurityHeaders('POST'),
 				body: JSON.stringify({ visible: nextVisible })
 			});
 			setAdminMenuPostId(null);
+			alert(nextVisible ? '已设为可见' : '已隐藏');
 			await fetchPosts(pageOffset);
-		} catch {
-			return;
+		} catch (e: any) {
+			alert(String(e?.message || e));
 		} finally {
 			setAdminActionPostId(null);
 		}
 	}
 
-	async function adminDeletePost(post: Post) {
+	async function adminToggleSiteFeature(post: Post) {
 		if (!user || user.role !== 'admin') return;
+		setAdminActionPostId(post.id);
+		try {
+			const next = !(Number(post.site_featured ?? 0) === 1);
+			await apiFetch(`/admin/posts/${post.id}/site-feature`, {
+				method: 'POST',
+				headers: getSecurityHeaders('POST'),
+				body: JSON.stringify({ featured: next })
+			});
+			setAdminMenuPostId(null);
+			alert(next ? '已设为官网精选' : '已取消官网精选');
+			await fetchPosts(pageOffset);
+		} catch (e: any) {
+			alert(String(e?.message || e));
+		} finally {
+			setAdminActionPostId(null);
+		}
+	}
+
+	async function deletePostFromList(post: Post) {
+		if (!user) return;
+		const isAdmin = user.role === 'admin';
+		const isOwner = user.id === post.author_id;
+		if (!isAdmin && !isOwner) return;
+		if (!isAdmin && Number(post.site_featured ?? 0) === 1) {
+			alert('官网精选帖不可由作者删除');
+			return;
+		}
 		if (!confirm('确定要删除这个帖子吗？此操作无法撤销。')) return;
 		setAdminActionPostId(post.id);
 		try {
-			await apiFetch(`/admin/posts/${post.id}`, {
+			const path = isAdmin ? `/admin/posts/${post.id}` : `/posts/${post.id}`;
+			await apiFetch(path, {
 				method: 'DELETE',
 				headers: getSecurityHeaders('DELETE')
 			});
 			setAdminMenuPostId(null);
+			alert('已删除');
 			await fetchPosts(pageOffset);
-		} catch {
-			return;
+		} catch (e: any) {
+			alert(String(e?.message || e));
 		} finally {
 			setAdminActionPostId(null);
 		}
 	}
 
-	async function adminMovePost(post: Post, categoryId: number | null) {
+	async function adminMovePost(post: Post, categoryId: number) {
 		if (!user || user.role !== 'admin') return;
 		setAdminActionPostId(post.id);
 		try {
@@ -465,8 +517,8 @@ export function IndexPage() {
 			});
 			setAdminMenuPostId(null);
 			await fetchPosts(pageOffset);
-		} catch {
-			return;
+		} catch (e: any) {
+			alert(String(e?.message || e));
 		} finally {
 			setAdminActionPostId(null);
 		}
@@ -484,6 +536,7 @@ export function IndexPage() {
 		if (titleErr) return setCreateError(titleErr);
 		const contentErr = validateText(newContent, '内容');
 		if (contentErr) return setCreateError(contentErr);
+		if (!newCategoryId) return setCreateError('请选择分类');
 		if (newTitle.length > 30) return setCreateError('标题过长 (最多 30 字符)');
 		if (newContent.length > 3000) return setCreateError('内容过长 (最多 3000 字符)');
 		if (turnstileActive && !turnstileToken) return setCreateError('请完成验证码验证');
@@ -496,16 +549,19 @@ export function IndexPage() {
 				body: JSON.stringify({
 					title: newTitle,
 					content: newContent,
-					category_id: newCategoryId ? Number(newCategoryId) : null,
+					category_id: Number(newCategoryId),
+					is_visible: newVisible,
 					'cf-turnstile-response': turnstileToken
 				})
 			});
 			setNewTitle('');
 			setNewContent('');
 			setNewCategoryId('');
+			setNewVisible(true);
 			setTurnstileToken('');
 			setTurnstileResetKey((v) => v + 1);
 			setCreateOpen(false);
+			alert(newVisible ? '发布成功（可见帖作者不可再编辑）' : '发布成功（已隐藏）');
 			await fetchPosts(0);
 		} catch (e: any) {
 			setCreateError(String(e?.message || e));
@@ -637,7 +693,6 @@ export function IndexPage() {
 								{(
 									[
 										{ id: '', label: '全部', adminOnly: false },
-										{ id: 'uncategorized', label: '未分类', adminOnly: false },
 										...categories
 											.filter(
 												(c) =>
@@ -683,6 +738,23 @@ export function IndexPage() {
 										</button>
 									);
 								})}
+								<button
+									type="button"
+									role="option"
+									aria-selected={siteFeaturedOnly}
+									className={
+										siteFeaturedOnly
+											? 'inline-flex items-center gap-1 rounded-full border border-sky-600 bg-sky-600 px-3 py-1 text-xs font-medium text-white'
+											: 'inline-flex items-center gap-1 rounded-full border bg-background px-3 py-1 text-xs font-medium text-foreground hover:bg-muted/60'
+									}
+									onClick={() => {
+										setSiteFeaturedOnly((v) => !v);
+										setPageOffset(0);
+									}}
+								>
+									<Star className="h-3 w-3" />
+									官网精选
+								</button>
 							</div>
 						) : null}
 					</div>
@@ -728,14 +800,15 @@ export function IndexPage() {
 										<Input id="new-title" maxLength={30} value={newTitle} onChange={(e) => setNewTitle(e.target.value)} required />
 									</div>
 									<div className="space-y-2">
-										<Label htmlFor="new-category">分类 (可选)</Label>
+										<Label htmlFor="new-category">分类</Label>
 										<select
 											id="new-category"
 											className="h-9 w-full rounded-md border bg-background px-3 text-sm"
 											value={newCategoryId}
 											onChange={(e) => setNewCategoryId(e.target.value)}
+											required
 										>
-											<option value="">无分类</option>
+											<option value="">请选择分类</option>
 											{categories
 												.filter(
 													(c) =>
@@ -750,6 +823,15 @@ export function IndexPage() {
 												))}
 										</select>
 									</div>
+									<label className="flex items-center gap-2 text-sm">
+										<input
+											type="checkbox"
+											className="h-4 w-4"
+											checked={newVisible}
+											onChange={(e) => setNewVisible(e.target.checked)}
+										/>
+										设置可见（勾选后作者不可再编辑，仍可隐藏）
+									</label>
 								</div>
 								<div className="space-y-2">
 								<div className="flex flex-wrap items-center justify-between gap-2">
@@ -882,15 +964,17 @@ export function IndexPage() {
 												<span className="inline-flex items-center rounded-full border border-white/40 bg-background/70 px-2 py-0.5 text-[11px] font-medium text-foreground backdrop-blur">
 													{p.category_name}
 												</span>
-											) : (
-												<span className="inline-flex items-center rounded-full border border-white/40 bg-background/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground backdrop-blur">
-													未分类
-												</span>
-											)}
+											) : null}
 											<span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-200">
 												<Pin className="h-3 w-3" />
 												置顶
 											</span>
+											{Number(p.site_featured ?? 0) === 1 ? (
+												<span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:text-sky-200">
+													<Star className="h-3 w-3" />
+													官网精选
+												</span>
+											) : null}
 											{Number(p.is_visible ?? 1) === 0 ? (
 												<span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
 													<EyeOff className="h-3 w-3" />
@@ -930,8 +1014,12 @@ export function IndexPage() {
 							const coverUrl = getCoverImageUrl(p.content || '');
 							const isAdmin = user?.role === 'admin';
 							const isOwner = !!user && user.id === p.author_id;
-							const canManage = isAdmin || isOwner;
+							const isFeatured = Number(p.site_featured ?? 0) === 1;
 							const isHidden = Number(p.is_visible ?? 1) === 0;
+							const canHide = isAdmin || (isOwner && !isFeatured && !isHidden);
+							const canShow = isAdmin && isHidden;
+							const canDelete = isAdmin || (isOwner && !isFeatured);
+							const canManage = isAdmin || isOwner;
 							const menuOpen = adminMenuPostId === p.id;
 							const actionLoading = adminActionPostId === p.id;
 							return (
@@ -962,6 +1050,12 @@ export function IndexPage() {
 															<span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
 																<Pin className="h-3.5 w-3.5" />
 																置顶
+															</span>
+														) : null}
+														{isFeatured ? (
+															<span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-300">
+																<Star className="h-3.5 w-3.5" />
+																官网精选
 															</span>
 														) : null}
 														{isHidden ? (
@@ -999,15 +1093,28 @@ export function IndexPage() {
 																	onTouchStart={(e) => e.stopPropagation()}
 																	onClick={(e) => e.stopPropagation()}
 																>
-																	<button
-																		type="button"
-																		disabled={actionLoading}
-																		className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
-																		onClick={() => void togglePostVisibility(p)}
-																	>
-																		{isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-																		{isHidden ? '设为可见' : '隐藏'}
-																	</button>
+																	{canHide || canShow ? (
+																		<button
+																			type="button"
+																			disabled={actionLoading}
+																			className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+																			onClick={() => void togglePostVisibility(p)}
+																		>
+																			{isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+																			{isHidden ? '设为可见' : '隐藏'}
+																		</button>
+																	) : null}
+																	{isAdmin ? (
+																		<button
+																			type="button"
+																			disabled={actionLoading}
+																			className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+																			onClick={() => void adminToggleSiteFeature(p)}
+																		>
+																			<Star className="h-4 w-4" />
+																			{isFeatured ? '取消官网精选' : '官网精选'}
+																		</button>
+																	) : null}
 																	{isAdmin ? (
 																		<button
 																			type="button"
@@ -1019,12 +1126,12 @@ export function IndexPage() {
 																			{p.is_pinned ? '取消置顶' : '置顶'}
 																		</button>
 																	) : null}
-																	{isAdmin ? (
+																	{canDelete ? (
 																		<button
 																			type="button"
 																			disabled={actionLoading}
 																			className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
-																			onClick={() => void adminDeletePost(p)}
+																			onClick={() => void deletePostFromList(p)}
 																		>
 																			<Trash2 className="h-4 w-4" />
 																			删除
@@ -1034,14 +1141,6 @@ export function IndexPage() {
 																		<>
 																	<div className="my-1 h-px bg-border" />
 																	<div className="px-2 py-1 text-xs font-medium text-muted-foreground">移动到分类</div>
-																	<button
-																		type="button"
-																		disabled={actionLoading}
-																		className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
-																		onClick={() => void adminMovePost(p, null)}
-																	>
-																		未分类
-																	</button>
 																	{categories.map((c) => (
 																		<button
 																			key={c.id}

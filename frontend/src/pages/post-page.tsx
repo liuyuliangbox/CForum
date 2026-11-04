@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowLeft, Eye, EyeOff, Heart, MoreVertical, Pin, Pencil, Reply, Shield, Trash2, User, X } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Heart, MoreVertical, Pin, Pencil, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
 
 import { TurnstileWidget } from '@/components/turnstile';
 import { PageShell } from '@/components/page-shell';
@@ -239,14 +239,19 @@ export function PostPage() {
 
 	async function deletePost() {
 		if (!post) return;
+		const isAdmin = user?.role === 'admin';
+		if (!isAdmin && Number(post.site_featured ?? 0) === 1) {
+			alert('官网精选帖不可由作者删除');
+			return;
+		}
 		if (!confirm('确定要删除这个帖子吗？此操作无法撤销。')) return;
 		try {
-			const isAdmin = user?.role === 'admin';
 			const path = isAdmin ? `/admin/posts/${post.id}` : `/posts/${post.id}`;
 			await apiFetch(path, {
 				method: 'DELETE',
 				headers: getSecurityHeaders('DELETE')
 			});
+			alert('已删除');
 			window.location.href = '/';
 		} catch (e: any) {
 			alert(String(e?.message || e));
@@ -264,8 +269,9 @@ export function PostPage() {
 				body: JSON.stringify({ pinned: next })
 			});
 			setPost((prev) => (prev ? { ...prev, is_pinned: next ? 1 : 0 } : prev));
-		} catch {
-			return;
+			alert(next ? '已置顶' : '已取消置顶');
+		} catch (e: any) {
+			alert(String(e?.message || e));
 		} finally {
 			setAdminMenuOpen(false);
 		}
@@ -274,14 +280,32 @@ export function PostPage() {
 	async function toggleVisibility() {
 		if (!post) return;
 		if (!user || (user.role !== 'admin' && user.id !== post.author_id)) return;
+		const isAdmin = user.role === 'admin';
+		const nextVisible = !(Number(post.is_visible ?? 1) === 1);
+		if (!isAdmin && Number(post.site_featured ?? 0) === 1 && !nextVisible) {
+			alert('官网精选帖不可由作者隐藏');
+			return;
+		}
+		if (!isAdmin && nextVisible) {
+			alert('隐藏后不可再设为可见，请联系管理员');
+			return;
+		}
+		if (!nextVisible) {
+			const ok = confirm(
+				isAdmin
+					? '确定隐藏这篇帖子吗？'
+					: '确定隐藏这篇帖子吗？隐藏后将不可再设置为可见，仅管理员可恢复。'
+			);
+			if (!ok) return;
+		}
 		try {
-			const nextVisible = !(Number(post.is_visible ?? 1) === 1);
 			await apiFetch(`/posts/${post.id}/visibility`, {
 				method: 'POST',
 				headers: getSecurityHeaders('POST'),
 				body: JSON.stringify({ visible: nextVisible })
 			});
 			setPost((prev) => (prev ? { ...prev, is_visible: nextVisible ? 1 : 0 } : prev));
+			alert(nextVisible ? '已设为可见' : '已隐藏');
 		} catch (e: any) {
 			alert(String(e?.message || e));
 		} finally {
@@ -289,7 +313,40 @@ export function PostPage() {
 		}
 	}
 
-	async function adminMovePostCategory(categoryId: number | null) {
+	async function toggleSiteFeature() {
+		if (!post || !user || user.role !== 'admin') return;
+		try {
+			const next = !(Number(post.site_featured ?? 0) === 1);
+			await apiFetch(`/admin/posts/${post.id}/site-feature`, {
+				method: 'POST',
+				headers: getSecurityHeaders('POST'),
+				body: JSON.stringify({ featured: next })
+			});
+			setPost((prev) => (prev ? { ...prev, site_featured: next ? 1 : 0 } : prev));
+			alert(next ? '已设为官网精选' : '已取消官网精选');
+		} catch (e: any) {
+			alert(String(e?.message || e));
+		} finally {
+			setAdminMenuOpen(false);
+		}
+	}
+
+	async function toggleCommentFeature(commentId: number, currentlyFeatured: boolean) {
+		if (!user || user.role !== 'admin') return;
+		try {
+			await apiFetch(`/admin/comments/${commentId}/feature`, {
+				method: 'POST',
+				headers: getSecurityHeaders('POST'),
+				body: JSON.stringify({ featured: !currentlyFeatured })
+			});
+			alert(!currentlyFeatured ? '已设为评论精选' : '已取消评论精选');
+			await refresh();
+		} catch (e: any) {
+			alert(String(e?.message || e));
+		}
+	}
+
+	async function adminMovePostCategory(categoryId: number) {
 		if (!post) return;
 		if (!user || user.role !== 'admin') return;
 		try {
@@ -299,9 +356,10 @@ export function PostPage() {
 				body: JSON.stringify({ category_id: categoryId })
 			});
 			setAdminMenuOpen(false);
+			alert('已移动分类');
 			await refresh();
-		} catch {
-			return;
+		} catch (e: any) {
+			alert(String(e?.message || e));
 		}
 	}
 
@@ -365,6 +423,12 @@ export function PostPage() {
 												置顶
 											</span>
 										) : null}
+										{Number(post.site_featured ?? 0) === 1 ? (
+											<span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:text-sky-200">
+												<Star className="h-3 w-3" />
+												官网精选
+											</span>
+										) : null}
 										{Number(post.is_visible ?? 1) === 0 ? (
 											<span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
 												<EyeOff className="h-3 w-3" />
@@ -419,7 +483,9 @@ export function PostPage() {
 										<span className="sr-only">观看数</span>
 									</span>
 
-									{user && (user.role === 'admin' || user.id === post.author_id) ? (
+									{user &&
+									(user.role === 'admin' ||
+										(user.id === post.author_id && Number(post.is_visible ?? 1) === 0)) ? (
 										<>
 											<Button variant="outline" size="sm" onClick={() => setIsEditing((v) => !v)}>
 												{isEditing ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
@@ -443,23 +509,37 @@ export function PostPage() {
 											</Button>
 											{adminMenuOpen ? (
 												<div className="absolute right-0 top-full z-[60] mt-2 max-h-64 w-44 overflow-y-auto rounded-md border bg-background p-1 shadow-lg">
-													<button
-														type="button"
-														className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
-														onClick={() => void toggleVisibility()}
-													>
-														{Number(post.is_visible ?? 1) === 0 ? (
-															<>
-																<Eye className="h-4 w-4" />
-																设为可见
-															</>
-														) : (
-															<>
-																<EyeOff className="h-4 w-4" />
-																隐藏
-															</>
-														)}
-													</button>
+													{(user.role === 'admin' ||
+														(Number(post.is_visible ?? 1) === 1 &&
+															Number(post.site_featured ?? 0) !== 1)) ? (
+														<button
+															type="button"
+															className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+															onClick={() => void toggleVisibility()}
+														>
+															{Number(post.is_visible ?? 1) === 0 ? (
+																<>
+																	<Eye className="h-4 w-4" />
+																	设为可见
+																</>
+															) : (
+																<>
+																	<EyeOff className="h-4 w-4" />
+																	隐藏
+																</>
+															)}
+														</button>
+													) : null}
+													{user.role === 'admin' ? (
+														<button
+															type="button"
+															className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+															onClick={() => void toggleSiteFeature()}
+														>
+															<Star className="h-4 w-4" />
+															{Number(post.site_featured ?? 0) === 1 ? '取消官网精选' : '官网精选'}
+														</button>
+													) : null}
 													{user.role === 'admin' ? (
 														<button
 															type="button"
@@ -470,28 +550,23 @@ export function PostPage() {
 															{post.is_pinned ? '取消置顶' : '置顶'}
 														</button>
 													) : null}
-													<button
-														type="button"
-														className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
-														onClick={() => {
-															setAdminMenuOpen(false);
-															void deletePost();
-														}}
-													>
-														<Trash2 className="h-4 w-4" />
-														删除
-													</button>
+													{user.role === 'admin' || Number(post.site_featured ?? 0) !== 1 ? (
+														<button
+															type="button"
+															className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+															onClick={() => {
+																setAdminMenuOpen(false);
+																void deletePost();
+															}}
+														>
+															<Trash2 className="h-4 w-4" />
+															删除
+														</button>
+													) : null}
 													{user.role === 'admin' ? (
 														<>
 															<div className="my-1 h-px bg-border" />
 															<div className="px-2 py-1 text-xs font-medium text-muted-foreground">移动到分类</div>
-															<button
-																type="button"
-																className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
-																onClick={() => void adminMovePostCategory(null)}
-															>
-																未分类
-															</button>
 															{allCategories.map((c) => (
 																<button
 																	key={c.id}
@@ -629,6 +704,12 @@ export function PostPage() {
 																	<span className="sr-only">管理员</span>
 																</span>
 															) : null}
+															{Number(c.is_featured ?? 0) === 1 ? (
+																<span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-800 dark:text-sky-200">
+																	<Star className="h-3 w-3" />
+																	精选
+																</span>
+															) : null}
 															<span className="text-muted-foreground">{formatDate(c.created_at)}</span>
 														</span>
 													</div>
@@ -637,6 +718,19 @@ export function PostPage() {
 															<Reply className="h-4 w-4" />
 															<span className="sr-only">回复</span>
 														</Button>
+														{user?.role === 'admin' ? (
+															<Button
+																variant="ghost"
+																size="sm"
+																onClick={() => void toggleCommentFeature(c.id, Number(c.is_featured ?? 0) === 1)}
+																title={Number(c.is_featured ?? 0) === 1 ? '取消精选' : '设为精选'}
+															>
+																<Star className={`h-4 w-4 ${Number(c.is_featured ?? 0) === 1 ? 'fill-sky-500 text-sky-600' : ''}`} />
+																<span className="sr-only">
+																	{Number(c.is_featured ?? 0) === 1 ? '取消精选' : '设为精选'}
+																</span>
+															</Button>
+														) : null}
 														{user && (user.role === 'admin' || user.id === c.author_id) ? (
 															<Button variant="ghost" size="sm" onClick={() => deleteComment(c.id)}>
 																<Trash2 className="h-4 w-4" />
