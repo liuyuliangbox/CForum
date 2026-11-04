@@ -366,6 +366,47 @@ export default {
 			} catch (e) {
 				console.error('Failed to seed game categories', e);
 			}
+			// One-shot: migrate former Gaming-Community Markdown 开发日志 into「开发进度」
+			try {
+				const progressCat = await env.cforum_db
+					.prepare(`SELECT id FROM categories WHERE name = '开发进度' LIMIT 1`)
+					.first<{ id: number }>();
+				const admin = await env.cforum_db
+					.prepare(`SELECT id FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1`)
+					.first<{ id: number }>();
+				if (progressCat && admin) {
+					const legacyLogs: Array<{ title: string; content: string; created_at: string }> = [
+						{
+							title: '官网与社区脚手架上线',
+							created_at: '2026-11-03 12:00:00',
+							content:
+								'> 用独立社区仓库搭好 Astro 静态站，开发期以日志为主，论坛走 GitHub Discussions。\n\n本周把社区官网的第一版骨架推上了线。\n\n## 做了什么\n\n- 使用 Astro 搭建中文社区站，部署目标为 Cloudflare Pages\n- 对外品牌暂用工作室名 **liuyuliangbox**，项目代号 **Project Turn**（正式游戏名待定）\n- 页面包括：首页、开发日志、关于、社区规则、下载占位\n- 论坛计划使用 GitHub Discussions，文章评论后续接入 Giscus\n\n## 为什么先做官网\n\n游戏还在开发中，完整的新手指南和下载页很容易过时。先把**开发日志**和**反馈入口**立住，方便同步进度、收集想法。\n\n## 想听你的反馈\n\n如果你希望日志里优先看到哪一类内容（战斗原型、世界观、UI、网络架构），可以在 Discussions 里投票或直接留言。'
+						},
+						{
+							title: '单人优先：回合战斗的设计起点',
+							created_at: '2026-10-20 12:00:00',
+							content:
+								'> 先把单人回合战斗的信息可读性与节奏跑通，再考虑联网扩展。\n\nProject Turn 的定位是**单人优先**的回合制 RPG。联网能力会服务体验，但不会在早期绑架核心战斗循环。\n\n## 本阶段目标\n\n1. 玩家能在一屏内看懂敌我状态与关键选项\n2. 回合节奏可预期：思考时间留给玩家，演出不拖沓\n3. 构筑有差异，但避免前期数值爆炸\n\n## 下一周计划\n\n- 打磨一局「教学遭遇」的节奏\n- 整理技能描述规范，减少模糊用语\n- 继续把可公开的进度写进开发日志\n\n如果你玩过喜欢的单人回合制作品，欢迎在社区分享「哪一点让你愿意反复开一局」。'
+						}
+					];
+					for (const log of legacyLogs) {
+						const exists = await env.cforum_db
+							.prepare(`SELECT id FROM posts WHERE title = ? AND category_id = ? LIMIT 1`)
+							.bind(log.title, progressCat.id)
+							.first();
+						if (exists) continue;
+						const inserted = await env.cforum_db
+							.prepare(
+								`INSERT INTO posts (author_id, title, content, category_id, created_at) VALUES (?, ?, ?, ?, ?)`
+							)
+							.bind(admin.id, log.title, log.content, progressCat.id, log.created_at)
+							.run();
+						console.log('Seeded legacy log post', log.title, inserted.meta?.last_row_id);
+					}
+				}
+			} catch (e) {
+				console.error('Failed to seed legacy site logs', e);
+			}
 		};
 
 		// perform initialization before security setup
