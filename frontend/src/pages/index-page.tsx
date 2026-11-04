@@ -615,11 +615,17 @@ export function IndexPage() {
 									[
 										{ id: '', label: '全部', adminOnly: false },
 										{ id: 'uncategorized', label: '未分类', adminOnly: false },
-										...categories.map((c) => ({
-											id: String(c.id),
-											label: c.name,
-											adminOnly: !!(c.admin_only === true || c.admin_only === 1)
-										}))
+										...categories
+											.filter(
+												(c) =>
+													user?.role === 'admin' ||
+													!(c.show_on_forum === false || c.show_on_forum === 0)
+											)
+											.map((c) => ({
+												id: String(c.id),
+												label: c.name,
+												adminOnly: !!(c.admin_only === true || c.admin_only === 1)
+											}))
 									] as Array<{ id: string; label: string; adminOnly: boolean }>
 								).map((chip) => {
 									const active = selectedCategory === chip.id;
@@ -708,7 +714,11 @@ export function IndexPage() {
 										>
 											<option value="">无分类</option>
 											{categories
-												.filter((c) => !c.admin_only || user?.role === 'admin')
+												.filter(
+													(c) =>
+														(!c.admin_only || user?.role === 'admin') &&
+														(user?.role === 'admin' || !(c.show_on_forum === false || c.show_on_forum === 0))
+												)
 												.map((c) => (
 													<option key={c.id} value={String(c.id)}>
 														{c.name}

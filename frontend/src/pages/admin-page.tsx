@@ -35,9 +35,13 @@ export function AdminPage() {
 
 	const [newCategoryName, setNewCategoryName] = React.useState('');
 	const [newCategoryAdminOnly, setNewCategoryAdminOnly] = React.useState(false);
+	const [newCategoryShowOnSite, setNewCategoryShowOnSite] = React.useState(false);
+	const [newCategoryShowOnForum, setNewCategoryShowOnForum] = React.useState(true);
 	const [editingCategoryId, setEditingCategoryId] = React.useState<number | null>(null);
 	const [editingCategoryName, setEditingCategoryName] = React.useState('');
 	const [editingCategoryAdminOnly, setEditingCategoryAdminOnly] = React.useState(false);
+	const [editingCategoryShowOnSite, setEditingCategoryShowOnSite] = React.useState(false);
+	const [editingCategoryShowOnForum, setEditingCategoryShowOnForum] = React.useState(true);
 
 	const [editOpen, setEditOpen] = React.useState(false);
 	const [editUserId, setEditUserId] = React.useState<number | null>(null);
@@ -117,10 +121,17 @@ export function AdminPage() {
 			await apiFetch('/admin/categories', {
 				method: 'POST',
 				headers: getSecurityHeaders('POST'),
-				body: JSON.stringify({ name: newCategoryName, admin_only: newCategoryAdminOnly })
+				body: JSON.stringify({
+					name: newCategoryName,
+					admin_only: newCategoryAdminOnly,
+					show_on_site: newCategoryShowOnSite,
+					show_on_forum: newCategoryShowOnForum
+				})
 			});
 			setNewCategoryName('');
 			setNewCategoryAdminOnly(false);
+			setNewCategoryShowOnSite(false);
+			setNewCategoryShowOnForum(true);
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -138,11 +149,18 @@ export function AdminPage() {
 			await apiFetch(`/admin/categories/${id}`, {
 				method: 'PUT',
 				headers: getSecurityHeaders('PUT'),
-				body: JSON.stringify({ name: editingCategoryName, admin_only: editingCategoryAdminOnly })
+				body: JSON.stringify({
+					name: editingCategoryName,
+					admin_only: editingCategoryAdminOnly,
+					show_on_site: editingCategoryShowOnSite,
+					show_on_forum: editingCategoryShowOnForum
+				})
 			});
 			setEditingCategoryId(null);
 			setEditingCategoryName('');
 			setEditingCategoryAdminOnly(false);
+			setEditingCategoryShowOnSite(false);
+			setEditingCategoryShowOnForum(true);
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -399,13 +417,31 @@ export function AdminPage() {
 										/>
 										仅管理员发帖
 									</label>
+									<label className="mb-2 flex items-center gap-2 text-sm">
+										<input
+											type="checkbox"
+											className="h-4 w-4"
+											checked={newCategoryShowOnSite}
+											onChange={(e) => setNewCategoryShowOnSite(e.target.checked)}
+										/>
+										官网展示
+									</label>
+									<label className="mb-2 flex items-center gap-2 text-sm">
+										<input
+											type="checkbox"
+											className="h-4 w-4"
+											checked={newCategoryShowOnForum}
+											onChange={(e) => setNewCategoryShowOnForum(e.target.checked)}
+										/>
+										论坛展示
+									</label>
 									<Button onClick={createCategory} disabled={loading}>
 										添加
 									</Button>
 								</div>
 								<div className="space-y-2">
 									{categories.map((c) => (
-										<div key={c.id} className="flex items-center justify-between rounded-md border p-3 text-sm">
+										<div key={c.id} className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
 											{editingCategoryId === c.id ? (
 												<div className="flex flex-wrap items-center gap-3">
 													<Input
@@ -422,16 +458,40 @@ export function AdminPage() {
 														/>
 														仅管理员发帖
 													</label>
+													<label className="flex items-center gap-2 text-sm">
+														<input
+															type="checkbox"
+															className="h-4 w-4"
+															checked={editingCategoryShowOnSite}
+															onChange={(e) => setEditingCategoryShowOnSite(e.target.checked)}
+														/>
+														官网展示
+													</label>
+													<label className="flex items-center gap-2 text-sm">
+														<input
+															type="checkbox"
+															className="h-4 w-4"
+															checked={editingCategoryShowOnForum}
+															onChange={(e) => setEditingCategoryShowOnForum(e.target.checked)}
+														/>
+														论坛展示
+													</label>
 												</div>
 											) : (
 												<span>
 													{c.name}
 													{c.admin_only ? (
-														<span className="ml-2 text-xs text-muted-foreground">（仅管理员发帖）</span>
+														<span className="ml-2 text-xs text-muted-foreground">仅管理员发帖</span>
+													) : null}
+													{c.show_on_site ? (
+														<span className="ml-2 text-xs text-sky-700 dark:text-sky-300">官网</span>
+													) : null}
+													{c.show_on_forum === false || c.show_on_forum === 0 ? (
+														<span className="ml-2 text-xs text-amber-700 dark:text-amber-300">论坛隐藏</span>
 													) : null}
 												</span>
 											)}
-											<div className="flex items-center gap-2">
+											<div className="flex shrink-0 items-center gap-2">
 												{editingCategoryId === c.id ? (
 													<>
 														<Button variant="outline" size="sm" disabled={loading} onClick={() => updateCategory(c.id)}>
@@ -445,6 +505,8 @@ export function AdminPage() {
 																setEditingCategoryId(null);
 																setEditingCategoryName('');
 																setEditingCategoryAdminOnly(false);
+																setEditingCategoryShowOnSite(false);
+																setEditingCategoryShowOnForum(true);
 															}}
 														>
 															取消
@@ -458,6 +520,8 @@ export function AdminPage() {
 															setEditingCategoryId(c.id);
 															setEditingCategoryName(c.name);
 															setEditingCategoryAdminOnly(!!c.admin_only);
+															setEditingCategoryShowOnSite(!!c.show_on_site);
+															setEditingCategoryShowOnForum(!(c.show_on_forum === false || c.show_on_forum === 0));
 														}}
 													>
 														编辑

@@ -220,6 +220,8 @@ export default {
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   admin_only INTEGER NOT NULL DEFAULT 0,
+  show_on_site INTEGER NOT NULL DEFAULT 0,
+  show_on_forum INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`,
 					`CREATE TABLE IF NOT EXISTS posts (
@@ -308,6 +310,20 @@ export default {
 				// column already exists
 			}
 			try {
+				await env.cforum_db.prepare(
+					'ALTER TABLE categories ADD COLUMN show_on_site INTEGER NOT NULL DEFAULT 0'
+				).run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db.prepare(
+					'ALTER TABLE categories ADD COLUMN show_on_forum INTEGER NOT NULL DEFAULT 1'
+				).run();
+			} catch {
+				// column already exists
+			}
+			try {
 				await env.cforum_db
 					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_title', 'liuyuliangbox / Project Turn')`)
 					.run();
@@ -324,22 +340,27 @@ export default {
 					.prepare(`SELECT id FROM categories WHERE name = '开发进度' LIMIT 1`)
 					.first();
 				if (!existingGame) {
-					const seedCats: Array<{ name: string; admin_only: number }> = [
-						{ name: '开发进度', admin_only: 1 },
-						{ name: '玩法建议', admin_only: 0 },
-						{ name: 'Bug/体验', admin_only: 0 },
-						{ name: '美术氛围', admin_only: 0 },
-						{ name: '闲聊/招募', admin_only: 0 }
+					const seedCats: Array<{ name: string; admin_only: number; show_on_site: number; show_on_forum: number }> = [
+						{ name: '开发进度', admin_only: 1, show_on_site: 1, show_on_forum: 1 },
+						{ name: '玩法建议', admin_only: 0, show_on_site: 0, show_on_forum: 1 },
+						{ name: 'Bug/体验', admin_only: 0, show_on_site: 0, show_on_forum: 1 },
+						{ name: '美术氛围', admin_only: 0, show_on_site: 0, show_on_forum: 1 },
+						{ name: '闲聊/招募', admin_only: 0, show_on_site: 0, show_on_forum: 1 }
 					];
 					for (const cat of seedCats) {
 						await env.cforum_db
-							.prepare('INSERT OR IGNORE INTO categories (name, admin_only) VALUES (?, ?)')
-							.bind(cat.name, cat.admin_only)
+							.prepare(
+								'INSERT OR IGNORE INTO categories (name, admin_only, show_on_site, show_on_forum) VALUES (?, ?, ?, ?)'
+							)
+							.bind(cat.name, cat.admin_only, cat.show_on_site, cat.show_on_forum)
 							.run();
 					}
 				} else {
 					await env.cforum_db
 						.prepare(`UPDATE categories SET admin_only = 1 WHERE name = '开发进度' AND IFNULL(admin_only, 0) = 0`)
+						.run();
+					await env.cforum_db
+						.prepare(`UPDATE categories SET show_on_site = 1 WHERE name = '开发进度'`)
 						.run();
 				}
 			} catch (e) {
@@ -389,14 +410,16 @@ export default {
             '/api/config', '/api/login', '/api/register', '/api/verify', 
             '/api/auth/forgot-password', '/api/auth/reset-password', '/api/verify-email-change',
              // Static/Public GETs
-            '/api/posts', '/api/categories', '/api/users' 
+            '/api/posts', '/api/categories', '/api/users',
+			'/api/export/site-categories', '/api/export/site-posts'
         ];
         
         // Relax check for public GETs that don't need nonce
         const isPublicGet = method === 'GET' && (
             publicPaths.includes(url.pathname) || 
             url.pathname.match(/^\/api\/posts\/\d+$/) || 
-            url.pathname.match(/^\/api\/posts\/\d+\/comments$/)
+            url.pathname.match(/^\/api\/posts\/\d+\/comments$/) ||
+			url.pathname.match(/^\/api\/export\/site-posts\/\d+$/)
         );
 
         // However, user specifically asked for "Replay protection for sensitive operations".
@@ -1117,15 +1140,111 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			try {
 				const { results } = await env.cforum_db
 					.prepare(
-						'SELECT id, name, IFNULL(admin_only, 0) AS admin_only, created_at FROM categories ORDER BY created_at ASC'
+						`SELECT id, name,
+							IFNULL(admin_only, 0) AS admin_only,
+							IFNULL(show_on_site, 0) AS show_on_site,
+							IFNULL(show_on_forum, 1) AS show_on_forum,
+							created_at
+						 FROM categories ORDER BY created_at ASC`
 					)
 					.all();
 				return jsonResponse(
 					(results || []).map((row: any) => ({
 						...row,
-						admin_only: Number(row.admin_only) === 1
+						admin_only: Number(row.admin_only) === 1,
+						show_on_site: Number(row.show_on_site) === 1,
+						show_on_forum: Number(row.show_on_forum) === 1
 					}))
 				);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/export/site-categories — public, for official site builds
+		if (url.pathname === '/api/export/site-categories' && method === 'GET') {
+			try {
+				const { results } = await env.cforum_db
+					.prepare(
+						`SELECT id, name, created_at FROM categories
+						 WHERE IFNULL(show_on_site, 0) = 1
+						 ORDER BY created_at ASC`
+					)
+					.all();
+				return jsonResponse(results || []);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/export/site-posts — public posts in show_on_site categories
+		if (url.pathname === '/api/export/site-posts' && method === 'GET') {
+			try {
+				const limit = Math.min(parseInt(url.searchParams.get('limit') || '100', 10) || 100, 200);
+				const offset = Math.max(parseInt(url.searchParams.get('offset') || '0', 10) || 0, 0);
+				const categoryId = url.searchParams.get('category_id');
+
+				let query = `SELECT
+						posts.id, posts.title, posts.content, posts.category_id, posts.created_at, posts.is_pinned,
+						categories.name as category_name,
+						users.username as author_name
+					FROM posts
+					JOIN users ON posts.author_id = users.id
+					JOIN categories ON posts.category_id = categories.id
+					WHERE IFNULL(categories.show_on_site, 0) = 1`;
+				const params: any[] = [];
+				if (categoryId) {
+					query += ` AND posts.category_id = ?`;
+					params.push(categoryId);
+				}
+				query += ` ORDER BY posts.is_pinned DESC, posts.created_at DESC LIMIT ? OFFSET ?`;
+				params.push(limit, offset);
+
+				const { results } = await env.cforum_db.prepare(query).bind(...params).all();
+				const posts = (results || []).map((row: any) => {
+					const plain = String(row.content || '')
+						.replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+						.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+						.replace(/[#>*_`~\-]/g, ' ')
+						.replace(/\s+/g, ' ')
+						.trim();
+					return {
+						id: row.id,
+						title: row.title,
+						content: row.content,
+						summary: plain.slice(0, 160),
+						category_id: row.category_id,
+						category_name: row.category_name,
+						author_name: row.author_name,
+						is_pinned: Number(row.is_pinned) === 1,
+						created_at: row.created_at
+					};
+				});
+				return jsonResponse({ posts, total: posts.length });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/export/site-posts/:id
+		if (url.pathname.match(/^\/api\/export\/site-posts\/\d+$/) && method === 'GET') {
+			const postId = url.pathname.split('/')[4];
+			try {
+				const post = await env.cforum_db
+					.prepare(
+						`SELECT
+							posts.id, posts.title, posts.content, posts.category_id, posts.created_at, posts.is_pinned,
+							categories.name as category_name,
+							users.username as author_name
+						 FROM posts
+						 JOIN users ON posts.author_id = users.id
+						 JOIN categories ON posts.category_id = categories.id
+						 WHERE posts.id = ? AND IFNULL(categories.show_on_site, 0) = 1`
+					)
+					.bind(postId)
+					.first();
+				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
+				return jsonResponse(post);
 			} catch (e) {
 				return handleError(e);
 			}
@@ -1138,14 +1257,20 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { name, admin_only } = body;
+				const { name, admin_only, show_on_site, show_on_forum } = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				
 				const { success } = await env.cforum_db
-					.prepare('INSERT INTO categories (name, admin_only) VALUES (?, ?)')
-					.bind(name, admin_only ? 1 : 0)
+					.prepare(
+						'INSERT INTO categories (name, admin_only, show_on_site, show_on_forum) VALUES (?, ?, ?, ?)'
+					)
+					.bind(name, admin_only ? 1 : 0, show_on_site ? 1 : 0, show_on_forum === false || show_on_forum === 0 ? 0 : 1)
 					.run();
-				await security.logAudit(userPayload.id, 'CREATE_CATEGORY', 'category', name, { admin_only: !!admin_only }, request);
+				await security.logAudit(userPayload.id, 'CREATE_CATEGORY', 'category', name, {
+					admin_only: !!admin_only,
+					show_on_site: !!show_on_site,
+					show_on_forum: !(show_on_forum === false || show_on_forum === 0)
+				}, request);
 				return jsonResponse({ success });
 			} catch (e) {
 				return handleError(e);
@@ -1160,15 +1285,83 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { name, admin_only } = body;
+				const { name, admin_only, show_on_site, show_on_forum } = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				
 				await env.cforum_db
-					.prepare('UPDATE categories SET name = ?, admin_only = ? WHERE id = ?')
-					.bind(name, admin_only ? 1 : 0, id)
+					.prepare(
+						'UPDATE categories SET name = ?, admin_only = ?, show_on_site = ?, show_on_forum = ? WHERE id = ?'
+					)
+					.bind(
+						name,
+						admin_only ? 1 : 0,
+						show_on_site ? 1 : 0,
+						show_on_forum === false || show_on_forum === 0 ? 0 : 1,
+						id
+					)
 					.run();
-				await security.logAudit(userPayload.id, 'UPDATE_CATEGORY', 'category', id, { name, admin_only: !!admin_only }, request);
+				await security.logAudit(userPayload.id, 'UPDATE_CATEGORY', 'category', id, {
+					name,
+					admin_only: !!admin_only,
+					show_on_site: !!show_on_site,
+					show_on_forum: !(show_on_forum === false || show_on_forum === 0)
+				}, request);
 				return jsonResponse({ success: true });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/admin/import-posts — one-shot migration helper
+		if (url.pathname === '/api/admin/import-posts' && method === 'POST') {
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const body = (await request.json()) as any;
+				const items = Array.isArray(body?.posts) ? body.posts : [];
+				if (!items.length) return jsonResponse({ error: 'Missing posts' }, 400);
+
+				const created: number[] = [];
+				for (const item of items) {
+					const title = String(item?.title || '').trim().slice(0, 30);
+					const content = String(item?.content || '').trim().slice(0, 3000);
+					const categoryName = String(item?.category_name || '开发进度').trim();
+					if (!title || !content) continue;
+
+					let cat = await env.cforum_db
+						.prepare('SELECT id FROM categories WHERE name = ?')
+						.bind(categoryName)
+						.first<{ id: number }>();
+					if (!cat) {
+						const inserted = await env.cforum_db
+							.prepare(
+								'INSERT INTO categories (name, admin_only, show_on_site, show_on_forum) VALUES (?, 1, 1, 1)'
+							)
+							.bind(categoryName)
+							.run();
+						cat = { id: Number(inserted.meta?.last_row_id) };
+					}
+
+					const result = await env.cforum_db
+						.prepare('INSERT INTO posts (author_id, title, content, category_id) VALUES (?, ?, ?, ?)')
+						.bind(userPayload.id, title, content, cat.id)
+						.run();
+					const postId = Number(result.meta?.last_row_id);
+					if (item?.created_at && postId) {
+						try {
+							await env.cforum_db
+								.prepare('UPDATE posts SET created_at = ? WHERE id = ?')
+								.bind(String(item.created_at), postId)
+								.run();
+						} catch {
+							// ignore date rewrite failures
+						}
+					}
+					if (postId) created.push(postId);
+				}
+
+				await security.logAudit(userPayload.id, 'ADMIN_IMPORT_POSTS', 'post', 'batch', { count: created.length }, request);
+				return jsonResponse({ success: true, ids: created }, 201);
 			} catch (e) {
 				return handleError(e);
 			}
@@ -1713,7 +1906,10 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
                         params.push(categoryId);
                         countParams.push(categoryId);
                     }
-                }
+                } else {
+					// Hide forum-hidden category posts from the default feed
+					conditions.push(`(posts.category_id IS NULL OR IFNULL(categories.show_on_forum, 1) = 1)`);
+				}
 
 				if (q) {
 					conditions.push(`(posts.title LIKE ? OR posts.content LIKE ?)`);
@@ -1724,6 +1920,10 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 
 				if (conditions.length) {
 					query += ` WHERE ${conditions.join(' AND ')}`;
+					// count query also needs categories join when filtering by show_on_forum
+					if (!categoryId) {
+						countQuery = `SELECT COUNT(*) as total FROM posts LEFT JOIN categories ON posts.category_id = categories.id`;
+					}
 					countQuery += ` WHERE ${conditions.join(' AND ')}`;
 				}
 

@@ -13,6 +13,8 @@ export type Category = {
 	id: number;
 	name: string;
 	admin_only?: number | boolean;
+	show_on_site?: number | boolean;
+	show_on_forum?: number | boolean;
 	created_at: string;
 };
 
