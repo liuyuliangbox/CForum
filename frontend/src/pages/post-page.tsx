@@ -336,7 +336,7 @@ export function PostPage() {
 					</Card>
 				) : (
 					<>
-						<Card className="overflow-hidden border-violet-500/25 bg-gradient-to-br from-sky-500/15 via-violet-500/10 to-fuchsia-500/15 shadow-sm">
+						<Card className="border-violet-500/25 bg-gradient-to-br from-sky-500/15 via-violet-500/10 to-fuchsia-500/15 shadow-sm">
 							<CardHeader>
 								<CardTitle className="flex flex-col gap-2">
 									<div className="flex flex-wrap items-center gap-2">
@@ -404,7 +404,7 @@ export function PostPage() {
 									) : null}
 
 									{user && (user.role === 'admin' || user.id === post.author_id) ? (
-										<div className="relative" ref={adminMenuRef}>
+										<div className="relative z-30" ref={adminMenuRef}>
 											<Button
 												type="button"
 												variant="outline"
@@ -417,7 +417,7 @@ export function PostPage() {
 												<span className="sr-only">更多</span>
 											</Button>
 											{adminMenuOpen ? (
-												<div className="absolute right-0 top-full z-50 mt-2 w-44 rounded-md border bg-background p-1 shadow-md">
+												<div className="absolute right-0 top-full z-[60] mt-2 max-h-64 w-44 overflow-y-auto rounded-md border bg-background p-1 shadow-lg">
 													{user.role === 'admin' ? (
 														<button
 															type="button"

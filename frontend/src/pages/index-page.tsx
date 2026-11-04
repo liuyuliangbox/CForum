@@ -946,7 +946,7 @@ export function IndexPage() {
 															</Button>
 															{menuOpen ? (
 																<div
-																	className="absolute right-0 top-full z-[60] mt-1 w-44 rounded-md border bg-background p-1 shadow-lg"
+																	className="absolute right-0 top-full z-[60] mt-1 max-h-64 w-44 overflow-y-auto rounded-md border bg-background p-1 shadow-lg"
 																	onMouseDown={(e) => e.stopPropagation()}
 																	onTouchStart={(e) => e.stopPropagation()}
 																	onClick={(e) => e.stopPropagation()}
