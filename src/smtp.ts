@@ -1,7 +1,7 @@
 
 import { connect } from 'cloudflare:sockets';
 
-const DEFAULT_FROM_NAME = '论坛管理员';
+const DEFAULT_FROM_NAME = '社区管理员';
 
 // Timeout helper
 function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> {

@@ -371,10 +371,10 @@ export function AdminPage() {
 								<CardTitle>站点设置</CardTitle>
 							</CardHeader>
 							<CardContent className="space-y-4">
-								<p className="text-sm text-muted-foreground">论坛顶栏标题（仅论坛站）</p>
+								<p className="text-sm text-muted-foreground">社区顶栏标题（仅社区站）</p>
 								<div className="grid gap-3 sm:grid-cols-2">
 									<div className="space-y-2">
-										<Label htmlFor="site-title">论坛标题</Label>
+										<Label htmlFor="site-title">社区标题</Label>
 										<Input
 											id="site-title"
 											value={systemSettings.site_title}
@@ -383,7 +383,7 @@ export function AdminPage() {
 										/>
 									</div>
 									<div className="space-y-2">
-										<Label htmlFor="site-tagline">论坛副标题</Label>
+										<Label htmlFor="site-tagline">社区副标题</Label>
 										<Input
 											id="site-tagline"
 											value={systemSettings.site_tagline}
@@ -433,7 +433,7 @@ export function AdminPage() {
 										/>
 									</div>
 									<div className="space-y-2">
-										<Label htmlFor="forum-link-label">页脚论坛链接文案</Label>
+										<Label htmlFor="forum-link-label">页脚社区链接文案</Label>
 										<Input
 											id="forum-link-label"
 											value={systemSettings.forum_link_label}
@@ -545,7 +545,7 @@ export function AdminPage() {
 												checked={newCategoryShowOnForum}
 												onChange={(e) => setNewCategoryShowOnForum(e.target.checked)}
 											/>
-											论坛展示
+											社区展示
 										</label>
 										<Button onClick={createCategory} disabled={loading}>
 											添加
@@ -604,7 +604,7 @@ export function AdminPage() {
 																checked={editingCategoryShowOnForum}
 																onChange={(e) => setEditingCategoryShowOnForum(e.target.checked)}
 															/>
-															论坛展示
+															社区展示
 														</label>
 													</div>
 													{editingCategoryShowOnSite ? (
@@ -634,7 +634,7 @@ export function AdminPage() {
 														<span className="ml-2 text-xs text-muted-foreground">· {c.subtitle}</span>
 													) : null}
 													{c.show_on_forum === false || c.show_on_forum === 0 ? (
-														<span className="ml-2 text-xs text-amber-700 dark:text-amber-300">论坛隐藏</span>
+														<span className="ml-2 text-xs text-amber-700 dark:text-amber-300">社区隐藏</span>
 													) : null}
 												</span>
 											)}

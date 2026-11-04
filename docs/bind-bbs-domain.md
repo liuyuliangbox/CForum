@@ -1,6 +1,6 @@
 # 绑定 bbs.aridjaya.eu.org 到 CForum
 
-论坛已部署：
+社区已部署：
 
 - Pages 项目名：**`cforum`**
 - 生产子域：https://cforum-cae.pages.dev
@@ -30,5 +30,5 @@
 
 ## 4. 验收
 
-- https://cforum-cae.pages.dev 与 https://bbs.aridjaya.eu.org 打开同一套论坛
+- https://cforum-cae.pages.dev 与 https://bbs.aridjaya.eu.org 打开同一套社区
 - 首页可见分类芯片（默认展开）与置顶区

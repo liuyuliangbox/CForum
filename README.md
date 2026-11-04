@@ -1,6 +1,6 @@
 # CForum
 
-一个基于 Cloudflare Workers + Pages + D1 + R2 的论坛，支持帖子、评论、图片上传、2FA 等。
+一个基于 Cloudflare Workers + Pages + D1 + R2 的社区，支持帖子、评论、图片上传、2FA 等。
 
 **💡 性能优化**：采用 Pages + Worker 混合部署，静态资源免费无限请求，节省 ~90% Worker 成本！
 
@@ -88,7 +88,7 @@
 | `SMTP_USER` | SMTP 用户名 | 邮箱地址 | 非必需，未配置则无法注册 |
 | `SMTP_PASS` | SMTP 密码 | 应用专用密码（非主密码） | 非必需，未配置则无法注册 |
 | `SMTP_FROM` | 发送者邮箱 | 例如：noreply@example.com（未设置则使用 SMTP_USER） | 非必需，未配置则无法注册 |
-| `SMTP_FROM_NAME` | 发件人显示名称 | 例如：CForum（未设置则使用"论坛管理员"） | 非必需，未配置则无法注册 |
+| `SMTP_FROM_NAME` | 发件人显示名称 | 例如：CForum（未设置则使用"社区管理员"） | 非必需，未配置则无法注册 |
 | `BASE_URL` | 站点 URL | 例如：`https://forum.adysec.com`（未设置则自动使用当前请求域名） | 非必需，未配置则邮件异常 |
 | `TURNSTILE_SITE_KEY` | Cloudflare Turnstile Site Key | [Cloudflare Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile) | 非必需，未配置则使用Turnstile |
 | `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile Secret | [Cloudflare Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile) | 非必需，未配置则使用Turnstile |

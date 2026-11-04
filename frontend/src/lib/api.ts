@@ -17,7 +17,7 @@ export type Category = {
 	admin_only?: number | boolean;
 	show_on_site?: number | boolean;
 	show_on_forum?: number | boolean;
-	/** 官网导航与论坛分类共用排序，越小越靠前 */
+	/** 官网导航与社区分类共用排序，越小越靠前 */
 	sort_order?: number;
 	created_at: string;
 };

@@ -123,7 +123,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 10;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -491,8 +491,14 @@ export default {
 				}
 				await env.cforum_db
 					.prepare(
-						`UPDATE categories SET subtitle = '进度同步自论坛公开栏目，构建时生成静态页。'
+						`UPDATE categories SET subtitle = '进度同步自社区公开栏目，构建时生成静态页。'
 						 WHERE name = '开发进度' AND IFNULL(subtitle, '') = ''`
+					)
+					.run();
+				await env.cforum_db
+					.prepare(
+						`UPDATE categories SET subtitle = '进度同步自社区公开栏目，构建时生成静态页。'
+						 WHERE name = '开发进度' AND subtitle LIKE '%论坛%'`
 					)
 					.run();
 			} catch (e) {
@@ -512,7 +518,7 @@ export default {
 							title: '官网与社区脚手架上线',
 							created_at: '2026-11-03 12:00:00',
 							content:
-								'> 用独立社区仓库搭好 Astro 静态站，开发期以日志为主，论坛走 GitHub Discussions。\n\n本周把社区官网的第一版骨架推上了线。\n\n## 做了什么\n\n- 使用 Astro 搭建中文社区站，部署目标为 Cloudflare Pages\n- 对外品牌暂用工作室名 **liuyuliangbox**，项目代号 **Project Turn**（正式游戏名待定）\n- 页面包括：首页、开发日志、关于、社区规则、下载占位\n- 论坛计划使用 GitHub Discussions，文章评论后续接入 Giscus\n\n## 为什么先做官网\n\n游戏还在开发中，完整的新手指南和下载页很容易过时。先把**开发日志**和**反馈入口**立住，方便同步进度、收集想法。\n\n## 想听你的反馈\n\n如果你希望日志里优先看到哪一类内容（战斗原型、世界观、UI、网络架构），可以在 Discussions 里投票或直接留言。'
+								'> 用独立社区仓库搭好 Astro 静态站，开发期以日志为主，讨论走 GitHub Discussions。\n\n本周把社区官网的第一版骨架推上了线。\n\n## 做了什么\n\n- 使用 Astro 搭建中文社区站，部署目标为 Cloudflare Pages\n- 对外品牌暂用工作室名 **liuyuliangbox**，项目代号 **Project Turn**（正式游戏名待定）\n- 页面包括：首页、开发日志、关于、社区规则、下载占位\n- 社区计划使用 GitHub Discussions，文章评论后续接入 Giscus\n\n## 为什么先做官网\n\n游戏还在开发中，完整的新手指南和下载页很容易过时。先把**开发日志**和**反馈入口**立住，方便同步进度、收集想法。\n\n## 想听你的反馈\n\n如果你希望日志里优先看到哪一类内容（战斗原型、世界观、UI、网络架构），可以在 Discussions 里投票或直接留言。'
 						},
 						{
 							title: '单人优先：回合战斗的设计起点',
@@ -571,14 +577,14 @@ export default {
 							subtitle: '发言约定与讨论入口',
 							title: '社区规则',
 							content:
-								'正式论坛托管在 Cloudflare（CForum）。请先阅读规则，再参与讨论、反馈与建议。\n\n## 发言约定\n\n- 尊重他人：禁止人身攻击、歧视与骚扰。\n- 对事不对人：反馈尽量附带复现步骤、截图或期望行为。\n- 不剧透未公开内容：开发者未发布的剧情与数值请勿外传。\n- 不发布盗版、外挂、破解或恶意链接。\n- 标题写清楚：例如「建议 / Bug / 提问」，方便分类与检索。\n\n## 推荐分类\n\n- 开发进度：官方日志摘要与征集反馈\n- 玩法建议：设计讨论\n- Bug / 体验反馈\n- 美术与氛围讨论\n- 闲聊 / 招募测试\n\n进入论坛：https://bbs.aridjaya.eu.org'
+								'正式社区托管在 Cloudflare（CForum）。请先阅读规则，再参与讨论、反馈与建议。\n\n## 发言约定\n\n- 尊重他人：禁止人身攻击、歧视与骚扰。\n- 对事不对人：反馈尽量附带复现步骤、截图或期望行为。\n- 不剧透未公开内容：开发者未发布的剧情与数值请勿外传。\n- 不发布盗版、外挂、破解或恶意链接。\n- 标题写清楚：例如「建议 / Bug / 提问」，方便分类与检索。\n\n## 推荐分类\n\n- 开发进度：官方日志摘要与征集反馈\n- 玩法建议：设计讨论\n- Bug / 体验反馈\n- 美术与氛围讨论\n- 闲聊 / 招募测试\n\n进入社区：https://bbs.aridjaya.eu.org'
 						},
 						{
 							name: '下载',
 							subtitle: '内测与试玩入口',
 							title: '内测尚未开放',
 							content:
-								'liuyuliangbox / Project Turn 仍在开发中。公开试玩包与内测资格会通过开发日志与社区通知发布。\n\n## 想第一时间知道开放消息？\n\n- 关注官网「开发进度」栏目\n- 加入论坛 https://bbs.aridjaya.eu.org 的「闲聊 / 招募测试」分类'
+								'liuyuliangbox / Project Turn 仍在开发中。公开试玩包与内测资格会通过开发日志与社区通知发布。\n\n## 想第一时间知道开放消息？\n\n- 关注官网「开发进度」栏目\n- 加入社区 https://bbs.aridjaya.eu.org 的「闲聊 / 招募测试」分类'
 						}
 					];
 					for (const page of cmsPages) {
@@ -600,7 +606,7 @@ export default {
 							await env.cforum_db
 								.prepare(
 									`UPDATE categories
-									 SET show_on_site = 1, admin_only = 1,
+									 SET show_on_site = 1, admin_only = 1, show_on_forum = 0,
 									     subtitle = CASE WHEN IFNULL(subtitle,'') = '' THEN ? ELSE subtitle END
 									 WHERE id = ?`
 								)
@@ -619,11 +625,31 @@ export default {
 								)
 								.bind(admin.id, page.title, page.content, cat.id)
 								.run();
+						} else {
+							await env.cforum_db
+								.prepare(
+									`UPDATE posts SET content = REPLACE(content, '论坛', '社区')
+									 WHERE category_id = ? AND content LIKE '%论坛%'`
+								)
+								.bind(cat.id)
+								.run();
 						}
 					}
 				}
 			} catch (e) {
 				console.error('Failed to seed CMS site pages', e);
+			}
+
+			// One-shot: user-facing copy 论坛 → 社区（历史开发进度帖等）
+			try {
+				await env.cforum_db
+					.prepare(
+						`UPDATE posts SET content = REPLACE(content, '论坛', '社区')
+						 WHERE content LIKE '%论坛%'`
+					)
+					.run();
+			} catch (e) {
+				console.error('Failed to rewrite 论坛→社区 in posts', e);
 			}
 
 			try {
@@ -1508,6 +1534,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const { results } = await env.cforum_db
 					.prepare(
 						`SELECT id, name, IFNULL(subtitle, '') AS subtitle,
+							IFNULL(show_on_forum, 1) AS show_on_forum,
 							IFNULL(sort_order, 0) AS sort_order, created_at
 						 FROM categories
 						 WHERE IFNULL(show_on_site, 0) = 1
@@ -1518,6 +1545,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					(results || []).map((row: any) => ({
 						...row,
 						subtitle: String(row.subtitle || ''),
+						show_on_forum: Number(row.show_on_forum) === 1,
 						sort_order: Number(row.sort_order || 0)
 					}))
 				);
@@ -1910,7 +1938,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const baseUrl = getBaseUrl();
 				const verifyLink = `${baseUrl}/api/verify?token=${token}`;
 				const emailHtml = `
-					<h1>欢迎加入论坛，${user.username}！</h1>
+					<h1>欢迎加入社区，${user.username}！</h1>
 					<p>请点击下方链接验证您的邮箱地址：</p>
 					<a href="${verifyLink}">验证邮箱</a>
 					<p>如果您未请求此操作，请忽略此邮件。</p>
@@ -2204,7 +2232,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const verifyLink = `${baseUrl}/api/verify?token=${verificationToken}`;
 				
 				const emailHtml = `
-					<h1>欢迎加入论坛，${username}！</h1>
+					<h1>欢迎加入社区，${username}！</h1>
 					<p>请点击下方链接验证您的邮箱地址：</p>
 					<a href="${verifyLink}">验证邮箱</a>
 					<p>如果您未请求此操作，请忽略此邮件。</p>
