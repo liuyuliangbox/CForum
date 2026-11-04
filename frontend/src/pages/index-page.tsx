@@ -635,6 +635,22 @@ export function IndexPage() {
 								<option value="comments_desc">最多评论</option>
 								<option value="views_desc">最多观看</option>
 							</select>
+							<button
+								type="button"
+								aria-pressed={siteFeaturedOnly}
+								className={
+									siteFeaturedOnly
+										? 'inline-flex h-9 items-center gap-1 rounded-md border border-sky-600 bg-sky-600 px-3 text-sm font-medium text-white'
+										: 'inline-flex h-9 items-center gap-1 rounded-md border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted/60'
+								}
+								onClick={() => {
+									setSiteFeaturedOnly((v) => !v);
+									setPageOffset(0);
+								}}
+							>
+								<Star className="h-3.5 w-3.5" />
+								官网精选
+							</button>
 							<Button variant="outline" size="sm" onClick={() => fetchPosts(0)} disabled={loading}>
 								<RefreshCw className="h-4 w-4" />
 								<span className="sr-only">刷新</span>
@@ -738,23 +754,6 @@ export function IndexPage() {
 										</button>
 									);
 								})}
-								<button
-									type="button"
-									role="option"
-									aria-selected={siteFeaturedOnly}
-									className={
-										siteFeaturedOnly
-											? 'inline-flex items-center gap-1 rounded-full border border-sky-600 bg-sky-600 px-3 py-1 text-xs font-medium text-white'
-											: 'inline-flex items-center gap-1 rounded-full border bg-background px-3 py-1 text-xs font-medium text-foreground hover:bg-muted/60'
-									}
-									onClick={() => {
-										setSiteFeaturedOnly((v) => !v);
-										setPageOffset(0);
-									}}
-								>
-									<Star className="h-3 w-3" />
-									官网精选
-								</button>
 							</div>
 						) : null}
 					</div>
