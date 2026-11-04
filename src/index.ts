@@ -219,6 +219,7 @@ export default {
 					`CREATE TABLE IF NOT EXISTS categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
+  subtitle TEXT NOT NULL DEFAULT '',
   admin_only INTEGER NOT NULL DEFAULT 0,
   show_on_site INTEGER NOT NULL DEFAULT 0,
   show_on_forum INTEGER NOT NULL DEFAULT 1,
@@ -327,6 +328,13 @@ export default {
 			try {
 				await env.cforum_db.prepare(
 					'ALTER TABLE posts ADD COLUMN is_visible INTEGER NOT NULL DEFAULT 1'
+				).run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db.prepare(
+					`ALTER TABLE categories ADD COLUMN subtitle TEXT NOT NULL DEFAULT ''`
 				).run();
 			} catch {
 				// column already exists
@@ -1198,6 +1206,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const { results } = await env.cforum_db
 					.prepare(
 						`SELECT id, name,
+							IFNULL(subtitle, '') AS subtitle,
 							IFNULL(admin_only, 0) AS admin_only,
 							IFNULL(show_on_site, 0) AS show_on_site,
 							IFNULL(show_on_forum, 1) AS show_on_forum,
@@ -1208,6 +1217,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				return jsonResponse(
 					(results || []).map((row: any) => ({
 						...row,
+						subtitle: String(row.subtitle || ''),
 						admin_only: Number(row.admin_only) === 1,
 						show_on_site: Number(row.show_on_site) === 1,
 						show_on_forum: Number(row.show_on_forum) === 1
@@ -1223,12 +1233,17 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			try {
 				const { results } = await env.cforum_db
 					.prepare(
-						`SELECT id, name, created_at FROM categories
+						`SELECT id, name, IFNULL(subtitle, '') AS subtitle, created_at FROM categories
 						 WHERE IFNULL(show_on_site, 0) = 1
 						 ORDER BY created_at ASC`
 					)
 					.all();
-				return jsonResponse(results || []);
+				return jsonResponse(
+					(results || []).map((row: any) => ({
+						...row,
+						subtitle: String(row.subtitle || '')
+					}))
+				);
 			} catch (e) {
 				return handleError(e);
 			}
@@ -1316,19 +1331,27 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { name, admin_only, show_on_site, show_on_forum } = body;
+				const { name, admin_only, show_on_site, show_on_forum, subtitle } = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
+				const subtitleValue = show_on_site ? String(subtitle || '').trim().slice(0, 200) : '';
 				
 				const { success } = await env.cforum_db
 					.prepare(
-						'INSERT INTO categories (name, admin_only, show_on_site, show_on_forum) VALUES (?, ?, ?, ?)'
+						'INSERT INTO categories (name, subtitle, admin_only, show_on_site, show_on_forum) VALUES (?, ?, ?, ?, ?)'
 					)
-					.bind(name, admin_only ? 1 : 0, show_on_site ? 1 : 0, show_on_forum === false || show_on_forum === 0 ? 0 : 1)
+					.bind(
+						name,
+						subtitleValue,
+						admin_only ? 1 : 0,
+						show_on_site ? 1 : 0,
+						show_on_forum === false || show_on_forum === 0 ? 0 : 1
+					)
 					.run();
 				await security.logAudit(userPayload.id, 'CREATE_CATEGORY', 'category', name, {
 					admin_only: !!admin_only,
 					show_on_site: !!show_on_site,
-					show_on_forum: !(show_on_forum === false || show_on_forum === 0)
+					show_on_forum: !(show_on_forum === false || show_on_forum === 0),
+					subtitle: subtitleValue
 				}, request);
 				return jsonResponse({ success });
 			} catch (e) {
@@ -1344,15 +1367,17 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { name, admin_only, show_on_site, show_on_forum } = body;
+				const { name, admin_only, show_on_site, show_on_forum, subtitle } = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
+				const subtitleValue = show_on_site ? String(subtitle || '').trim().slice(0, 200) : '';
 				
 				await env.cforum_db
 					.prepare(
-						'UPDATE categories SET name = ?, admin_only = ?, show_on_site = ?, show_on_forum = ? WHERE id = ?'
+						'UPDATE categories SET name = ?, subtitle = ?, admin_only = ?, show_on_site = ?, show_on_forum = ? WHERE id = ?'
 					)
 					.bind(
 						name,
+						subtitleValue,
 						admin_only ? 1 : 0,
 						show_on_site ? 1 : 0,
 						show_on_forum === false || show_on_forum === 0 ? 0 : 1,
@@ -1363,7 +1388,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					name,
 					admin_only: !!admin_only,
 					show_on_site: !!show_on_site,
-					show_on_forum: !(show_on_forum === false || show_on_forum === 0)
+					show_on_forum: !(show_on_forum === false || show_on_forum === 0),
+					subtitle: subtitleValue
 				}, request);
 				return jsonResponse({ success: true });
 			} catch (e) {

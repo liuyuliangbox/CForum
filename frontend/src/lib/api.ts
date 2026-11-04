@@ -12,6 +12,8 @@ export type ForumConfig = {
 export type Category = {
 	id: number;
 	name: string;
+	/** 官网副标题（仅 show_on_site 时使用，可选） */
+	subtitle?: string;
 	admin_only?: number | boolean;
 	show_on_site?: number | boolean;
 	show_on_forum?: number | boolean;

@@ -37,11 +37,13 @@ export function AdminPage() {
 	const [newCategoryAdminOnly, setNewCategoryAdminOnly] = React.useState(false);
 	const [newCategoryShowOnSite, setNewCategoryShowOnSite] = React.useState(false);
 	const [newCategoryShowOnForum, setNewCategoryShowOnForum] = React.useState(true);
+	const [newCategorySubtitle, setNewCategorySubtitle] = React.useState('');
 	const [editingCategoryId, setEditingCategoryId] = React.useState<number | null>(null);
 	const [editingCategoryName, setEditingCategoryName] = React.useState('');
 	const [editingCategoryAdminOnly, setEditingCategoryAdminOnly] = React.useState(false);
 	const [editingCategoryShowOnSite, setEditingCategoryShowOnSite] = React.useState(false);
 	const [editingCategoryShowOnForum, setEditingCategoryShowOnForum] = React.useState(true);
+	const [editingCategorySubtitle, setEditingCategorySubtitle] = React.useState('');
 
 	const [editOpen, setEditOpen] = React.useState(false);
 	const [editUserId, setEditUserId] = React.useState<number | null>(null);
@@ -125,13 +127,15 @@ export function AdminPage() {
 					name: newCategoryName,
 					admin_only: newCategoryAdminOnly,
 					show_on_site: newCategoryShowOnSite,
-					show_on_forum: newCategoryShowOnForum
+					show_on_forum: newCategoryShowOnForum,
+					subtitle: newCategoryShowOnSite ? newCategorySubtitle : ''
 				})
 			});
 			setNewCategoryName('');
 			setNewCategoryAdminOnly(false);
 			setNewCategoryShowOnSite(false);
 			setNewCategoryShowOnForum(true);
+			setNewCategorySubtitle('');
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -153,7 +157,8 @@ export function AdminPage() {
 					name: editingCategoryName,
 					admin_only: editingCategoryAdminOnly,
 					show_on_site: editingCategoryShowOnSite,
-					show_on_forum: editingCategoryShowOnForum
+					show_on_forum: editingCategoryShowOnForum,
+					subtitle: editingCategoryShowOnSite ? editingCategorySubtitle : ''
 				})
 			});
 			setEditingCategoryId(null);
@@ -161,6 +166,7 @@ export function AdminPage() {
 			setEditingCategoryAdminOnly(false);
 			setEditingCategoryShowOnSite(false);
 			setEditingCategoryShowOnForum(true);
+			setEditingCategorySubtitle('');
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -403,79 +409,110 @@ export function AdminPage() {
 								<CardTitle>分类管理</CardTitle>
 							</CardHeader>
 							<CardContent className="space-y-4">
-								<div className="flex flex-wrap items-end gap-3">
-									<div className="space-y-2">
-										<Label htmlFor="cat-name">分类名称</Label>
-										<Input id="cat-name" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} />
+								<div className="space-y-3">
+									<div className="flex flex-wrap items-end gap-3">
+										<div className="space-y-2">
+											<Label htmlFor="cat-name">分类名称</Label>
+											<Input id="cat-name" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} />
+										</div>
+										<label className="mb-2 flex items-center gap-2 text-sm">
+											<input
+												type="checkbox"
+												className="h-4 w-4"
+												checked={newCategoryAdminOnly}
+												onChange={(e) => setNewCategoryAdminOnly(e.target.checked)}
+											/>
+											仅管理员发帖
+										</label>
+										<label className="mb-2 flex items-center gap-2 text-sm">
+											<input
+												type="checkbox"
+												className="h-4 w-4"
+												checked={newCategoryShowOnSite}
+												onChange={(e) => {
+													setNewCategoryShowOnSite(e.target.checked);
+													if (!e.target.checked) setNewCategorySubtitle('');
+												}}
+											/>
+											官网展示
+										</label>
+										<label className="mb-2 flex items-center gap-2 text-sm">
+											<input
+												type="checkbox"
+												className="h-4 w-4"
+												checked={newCategoryShowOnForum}
+												onChange={(e) => setNewCategoryShowOnForum(e.target.checked)}
+											/>
+											论坛展示
+										</label>
+										<Button onClick={createCategory} disabled={loading}>
+											添加
+										</Button>
 									</div>
-									<label className="mb-2 flex items-center gap-2 text-sm">
-										<input
-											type="checkbox"
-											className="h-4 w-4"
-											checked={newCategoryAdminOnly}
-											onChange={(e) => setNewCategoryAdminOnly(e.target.checked)}
-										/>
-										仅管理员发帖
-									</label>
-									<label className="mb-2 flex items-center gap-2 text-sm">
-										<input
-											type="checkbox"
-											className="h-4 w-4"
-											checked={newCategoryShowOnSite}
-											onChange={(e) => setNewCategoryShowOnSite(e.target.checked)}
-										/>
-										官网展示
-									</label>
-									<label className="mb-2 flex items-center gap-2 text-sm">
-										<input
-											type="checkbox"
-											className="h-4 w-4"
-											checked={newCategoryShowOnForum}
-											onChange={(e) => setNewCategoryShowOnForum(e.target.checked)}
-										/>
-										论坛展示
-									</label>
-									<Button onClick={createCategory} disabled={loading}>
-										添加
-									</Button>
+									{newCategoryShowOnSite ? (
+										<div className="max-w-xl space-y-2">
+											<Label htmlFor="cat-subtitle">官网副标题（可选）</Label>
+											<Input
+												id="cat-subtitle"
+												value={newCategorySubtitle}
+												placeholder="展示在官网栏目页标题下方"
+												onChange={(e) => setNewCategorySubtitle(e.target.value)}
+											/>
+										</div>
+									) : null}
 								</div>
 								<div className="space-y-2">
 									{categories.map((c) => (
 										<div key={c.id} className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
 											{editingCategoryId === c.id ? (
-												<div className="flex flex-wrap items-center gap-3">
-													<Input
-														value={editingCategoryName}
-														onChange={(e) => setEditingCategoryName(e.target.value)}
-														className="h-9 max-w-xs"
-													/>
-													<label className="flex items-center gap-2 text-sm">
-														<input
-															type="checkbox"
-															className="h-4 w-4"
-															checked={editingCategoryAdminOnly}
-															onChange={(e) => setEditingCategoryAdminOnly(e.target.checked)}
+												<div className="flex w-full flex-col gap-3">
+													<div className="flex flex-wrap items-center gap-3">
+														<Input
+															value={editingCategoryName}
+															onChange={(e) => setEditingCategoryName(e.target.value)}
+															className="h-9 max-w-xs"
 														/>
-														仅管理员发帖
-													</label>
-													<label className="flex items-center gap-2 text-sm">
-														<input
-															type="checkbox"
-															className="h-4 w-4"
-															checked={editingCategoryShowOnSite}
-															onChange={(e) => setEditingCategoryShowOnSite(e.target.checked)}
-														/>
-														官网展示
-													</label>
-													<label className="flex items-center gap-2 text-sm">
-														<input
-															type="checkbox"
-															className="h-4 w-4"
-															checked={editingCategoryShowOnForum}
-															onChange={(e) => setEditingCategoryShowOnForum(e.target.checked)}
-														/>
-														论坛展示
-													</label>
+														<label className="flex items-center gap-2 text-sm">
+															<input
+																type="checkbox"
+																className="h-4 w-4"
+																checked={editingCategoryAdminOnly}
+																onChange={(e) => setEditingCategoryAdminOnly(e.target.checked)}
+															/>
+															仅管理员发帖
+														</label>
+														<label className="flex items-center gap-2 text-sm">
+															<input
+																type="checkbox"
+																className="h-4 w-4"
+																checked={editingCategoryShowOnSite}
+																onChange={(e) => {
+																	setEditingCategoryShowOnSite(e.target.checked);
+																	if (!e.target.checked) setEditingCategorySubtitle('');
+																}}
+															/>
+															官网展示
+														</label>
+														<label className="flex items-center gap-2 text-sm">
+															<input
+																type="checkbox"
+																className="h-4 w-4"
+																checked={editingCategoryShowOnForum}
+																onChange={(e) => setEditingCategoryShowOnForum(e.target.checked)}
+															/>
+															论坛展示
+														</label>
+													</div>
+													{editingCategoryShowOnSite ? (
+														<div className="max-w-xl space-y-1">
+															<Label>官网副标题（可选）</Label>
+															<Input
+																value={editingCategorySubtitle}
+																placeholder="展示在官网栏目页标题下方"
+																onChange={(e) => setEditingCategorySubtitle(e.target.value)}
+															/>
+														</div>
+													) : null}
 												</div>
 											) : (
 												<span>
@@ -485,6 +522,9 @@ export function AdminPage() {
 													) : null}
 													{c.show_on_site ? (
 														<span className="ml-2 text-xs text-sky-700 dark:text-sky-300">官网</span>
+													) : null}
+													{c.show_on_site && c.subtitle ? (
+														<span className="ml-2 text-xs text-muted-foreground">· {c.subtitle}</span>
 													) : null}
 													{c.show_on_forum === false || c.show_on_forum === 0 ? (
 														<span className="ml-2 text-xs text-amber-700 dark:text-amber-300">论坛隐藏</span>
@@ -507,6 +547,7 @@ export function AdminPage() {
 																setEditingCategoryAdminOnly(false);
 																setEditingCategoryShowOnSite(false);
 																setEditingCategoryShowOnForum(true);
+																setEditingCategorySubtitle('');
 															}}
 														>
 															取消
@@ -522,6 +563,7 @@ export function AdminPage() {
 															setEditingCategoryAdminOnly(!!c.admin_only);
 															setEditingCategoryShowOnSite(!!c.show_on_site);
 															setEditingCategoryShowOnForum(!(c.show_on_forum === false || c.show_on_forum === 0));
+															setEditingCategorySubtitle(String(c.subtitle || ''));
 														}}
 													>
 														编辑
