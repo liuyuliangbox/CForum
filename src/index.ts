@@ -233,6 +233,7 @@ export default {
   category_id INTEGER,
   is_pinned INTEGER DEFAULT 0,
   is_visible INTEGER NOT NULL DEFAULT 1,
+  author_publish_until TIMESTAMP,
   site_featured INTEGER NOT NULL DEFAULT 0,
   view_count INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -337,6 +338,13 @@ export default {
 			try {
 				await env.cforum_db.prepare(
 					'ALTER TABLE posts ADD COLUMN site_featured INTEGER NOT NULL DEFAULT 0'
+				).run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db.prepare(
+					'ALTER TABLE posts ADD COLUMN author_publish_until TIMESTAMP'
 				).run();
 			} catch {
 				// column already exists
@@ -2168,7 +2176,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			}
 		}
 
-		// POST /api/posts/:id/visibility — author can hide only; admin can hide/show
+		// POST /api/posts/:id/visibility — author: hide anytime; first-publish within author_publish_until; admin: hide/show
 		if (url.pathname.match(/^\/api\/posts\/\d+\/visibility$/) && method === 'POST') {
 			const postId = url.pathname.split('/')[3];
 			try {
@@ -2177,10 +2185,20 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const visible = !(body?.visible === false || body?.visible === 0);
 				const post = await env.cforum_db
 					.prepare(
-						'SELECT id, author_id, IFNULL(site_featured, 0) AS site_featured FROM posts WHERE id = ?'
+						`SELECT id, author_id,
+							IFNULL(site_featured, 0) AS site_featured,
+							IFNULL(is_visible, 1) AS is_visible,
+							author_publish_until
+						 FROM posts WHERE id = ?`
 					)
 					.bind(postId)
-					.first<{ id: number; author_id: number; site_featured: number }>();
+					.first<{
+						id: number;
+						author_id: number;
+						site_featured: number;
+						is_visible: number;
+						author_publish_until: string | null;
+					}>();
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
 				const isAdmin = userPayload.role === 'admin';
 				const isAuthor = post.author_id === userPayload.id;
@@ -2189,15 +2207,30 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				}
 				if (!isAdmin) {
 					if (visible) {
-						return jsonResponse({ error: '隐藏后不可再设为可见，请联系管理员' }, 403);
-					}
-					if (Number(post.site_featured) === 1) {
+						const untilRaw = post.author_publish_until;
+						if (!untilRaw) {
+							return jsonResponse({ error: '隐藏后不可再设为可见，请联系管理员' }, 403);
+						}
+						const untilMs = Date.parse(
+							String(untilRaw).endsWith('Z') ? String(untilRaw) : `${untilRaw}Z`
+						);
+						if (Number.isNaN(untilMs) || Date.now() > untilMs) {
+							return jsonResponse(
+								{ error: '超过 30 分钟未设为可见，已失去设为可见权限，请联系管理员' },
+								403
+							);
+						}
+					} else if (Number(post.site_featured) === 1) {
 						return jsonResponse({ error: '官网精选帖不可由作者隐藏' }, 403);
 					}
 				}
 				await env.cforum_db
-					.prepare('UPDATE posts SET is_visible = ? WHERE id = ?')
-					.bind(visible ? 1 : 0, postId)
+					.prepare(
+						visible
+							? 'UPDATE posts SET is_visible = 1, author_publish_until = NULL WHERE id = ?'
+							: 'UPDATE posts SET is_visible = 0 WHERE id = ?'
+					)
+					.bind(postId)
 					.run();
 				await security.logAudit(
 					userPayload.id,
@@ -2207,7 +2240,11 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					{ visible },
 					request
 				);
-				return jsonResponse({ success: true, is_visible: visible ? 1 : 0 });
+				return jsonResponse({
+					success: true,
+					is_visible: visible ? 1 : 0,
+					author_publish_until: visible ? null : post.author_publish_until
+				});
 			} catch (e) {
 				return handleError(e);
 			}
@@ -2586,16 +2623,33 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					return jsonResponse({ error: '该分类仅管理员可发帖' }, 403);
 				}
 
-				const { success } = await env.cforum_db.prepare(
-					'INSERT INTO posts (author_id, title, content, category_id, is_visible) VALUES (?, ?, ?, ?, ?)'
-				).bind(userPayload.id, safeTitle.trim(), content.trim(), category_id, isVisible ? 1 : 0).run();
-				
+				const authorPublishUntil = isVisible
+					? null
+					: new Date(Date.now() + 30 * 60 * 1000)
+							.toISOString()
+							.replace('T', ' ')
+							.slice(0, 19);
+				const { success } = await env.cforum_db
+					.prepare(
+						'INSERT INTO posts (author_id, title, content, category_id, is_visible, author_publish_until) VALUES (?, ?, ?, ?, ?, ?)'
+					)
+					.bind(
+						userPayload.id,
+						safeTitle.trim(),
+						content.trim(),
+						category_id,
+						isVisible ? 1 : 0,
+						authorPublishUntil
+					)
+					.run();
+
 				await security.logAudit(userPayload.id, 'CREATE_POST', 'post', 'new', {
 					title_length: safeTitle.length,
-					is_visible: isVisible
+					is_visible: isVisible,
+					author_publish_until: authorPublishUntil
 				}, request);
 
-				return jsonResponse({ success }, 201);
+				return jsonResponse({ success, author_publish_until: authorPublishUntil }, 201);
 			} catch (e) {
 				return handleError(e);
 			}

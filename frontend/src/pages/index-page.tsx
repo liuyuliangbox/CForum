@@ -9,9 +9,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useConfig } from '@/hooks/use-config';
-import { apiFetch, formatDate, getSecurityHeaders, type Category, type Post } from '@/lib/api';
+import {
+	apiFetch,
+	formatCountdown,
+	formatDate,
+	getAuthorPublishRemainingMs,
+	getSecurityHeaders,
+	type Category,
+	type Post
+} from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
+import { cn } from '@/lib/utils';
 import { validateText } from '@/lib/validators';
 
 export function IndexPage() {
@@ -431,8 +440,15 @@ export function IndexPage() {
 			return;
 		}
 		if (!isAdmin && nextVisible) {
-			alert('隐藏后不可再设为可见，请联系管理员');
-			return;
+			const remain = getAuthorPublishRemainingMs(post);
+			if (remain <= 0) {
+				alert(
+					post.author_publish_until
+						? '超过 30 分钟未设为可见，已失去设为可见权限，请联系管理员'
+						: '隐藏后不可再设为可见，请联系管理员'
+				);
+				return;
+			}
 		}
 		if (!nextVisible) {
 			const ok = confirm(
@@ -440,6 +456,9 @@ export function IndexPage() {
 					? '确定隐藏这篇帖子吗？'
 					: '确定隐藏这篇帖子吗？隐藏后将不可再设置为可见，仅管理员可恢复。'
 			);
+			if (!ok) return;
+		} else if (!isAdmin) {
+			const ok = confirm('设为可见后将不可再编辑，请确认内容已审核无误。');
 			if (!ok) return;
 		}
 		setAdminActionPostId(post.id);
@@ -601,6 +620,24 @@ export function IndexPage() {
 	const pinnedPosts = posts.filter((p) => !!p.is_pinned);
 	const feedPosts = posts.filter((p) => !p.is_pinned);
 	const showPinnedBlock = !loading && pinnedPosts.length > 0 && pageOffset === 0 && !searchQuery;
+	const [nowMs, setNowMs] = React.useState(() => Date.now());
+	const needsPublishTick = React.useMemo(
+		() =>
+			!!user &&
+			posts.some(
+				(p) =>
+					user.id === p.author_id &&
+					Number(p.is_visible ?? 1) === 0 &&
+					!!p.author_publish_until &&
+					getAuthorPublishRemainingMs(p, nowMs) > 0
+			),
+		[posts, user, nowMs]
+	);
+	React.useEffect(() => {
+		if (!needsPublishTick) return;
+		const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+		return () => window.clearInterval(id);
+	}, [needsPublishTick]);
 
 	return (
 		<PageShell>
@@ -822,14 +859,21 @@ export function IndexPage() {
 												))}
 										</select>
 									</div>
-									<label className="flex items-center gap-2 text-sm">
-										<input
-											type="checkbox"
-											className="h-4 w-4"
-											checked={newVisible}
-											onChange={(e) => setNewVisible(e.target.checked)}
-										/>
-										设置可见（勾选后作者不可再编辑，仍可隐藏）
+									<label className="flex flex-col gap-1 text-sm">
+										<span className="flex items-center gap-2">
+											<input
+												type="checkbox"
+												className="h-4 w-4"
+												checked={newVisible}
+												onChange={(e) => setNewVisible(e.target.checked)}
+											/>
+											设置可见（勾选后作者不可再编辑，请仔细审核）
+										</span>
+										{!newVisible ? (
+											<span className="pl-6 text-xs text-muted-foreground">
+												未勾选时将进入审核倒计时：30 分钟内可设为可见，逾期将失去该权限
+											</span>
+										) : null}
 									</label>
 								</div>
 								<div className="space-y-2">
@@ -1015,8 +1059,10 @@ export function IndexPage() {
 							const isOwner = !!user && user.id === p.author_id;
 							const isFeatured = Number(p.site_featured ?? 0) === 1;
 							const isHidden = Number(p.is_visible ?? 1) === 0;
+							const publishRemainMs = isOwner ? getAuthorPublishRemainingMs(p, nowMs) : 0;
+							const canAuthorPublish = isOwner && isHidden && publishRemainMs > 0;
 							const canHide = isAdmin || (isOwner && !isFeatured && !isHidden);
-							const canShow = isAdmin && isHidden;
+							const canShow = (isAdmin && isHidden) || canAuthorPublish;
 							const canDelete = isAdmin || (isOwner && !isFeatured);
 							const canManage = isAdmin || isOwner;
 							const menuOpen = adminMenuPostId === p.id;
@@ -1024,7 +1070,10 @@ export function IndexPage() {
 							return (
 								<Card
 									key={p.id}
-									className="group relative transition hover:border-foreground/25 hover:shadow-sm"
+									className={cn(
+										'group relative transition hover:border-foreground/25 hover:shadow-sm',
+										menuOpen ? 'z-50' : 'z-0'
+									)}
 								>
 									<a
 										href={`/post?id=${p.id}`}
@@ -1204,6 +1253,16 @@ export function IndexPage() {
 														{p.view_count || 0}
 													</span>
 												</div>
+												{canAuthorPublish ? (
+													<div className="pointer-events-auto rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-900 dark:text-amber-100">
+														<span className="font-medium tabular-nums">
+															审核倒计时 {formatCountdown(publishRemainMs)}
+														</span>
+														<span className="mt-0.5 block text-[11px] opacity-90">
+															到期前请设为可见，否则将失去设为可见权限
+														</span>
+													</div>
+												) : null}
 											</div>
 										</div>
 									</CardContent>

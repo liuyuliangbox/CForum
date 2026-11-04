@@ -8,7 +8,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useConfig } from '@/hooks/use-config';
-import { apiFetch, formatDate, getSecurityHeaders, type Category, type Comment, type Post } from '@/lib/api';
+import {
+	apiFetch,
+	formatCountdown,
+	formatDate,
+	getAuthorPublishRemainingMs,
+	getSecurityHeaders,
+	type Category,
+	type Comment,
+	type Post
+} from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
 import { validateText } from '@/lib/validators';
@@ -65,6 +74,17 @@ export function PostPage() {
 	const [adminMenuOpen, setAdminMenuOpen] = React.useState(false);
 	const adminMenuRef = React.useRef<HTMLDivElement | null>(null);
 	const [allCategories, setAllCategories] = React.useState<Category[]>([]);
+	const [publishNowMs, setPublishNowMs] = React.useState(() => Date.now());
+	const needsPublishTick =
+		!!user &&
+		!!post &&
+		user.id === post.author_id &&
+		getAuthorPublishRemainingMs(post, publishNowMs) > 0;
+	React.useEffect(() => {
+		if (!needsPublishTick) return;
+		const id = window.setInterval(() => setPublishNowMs(Date.now()), 1000);
+		return () => window.clearInterval(id);
+	}, [needsPublishTick]);
 
 	function getPostIdFromPath() {
 		const params = new URLSearchParams(window.location.search);
@@ -287,8 +307,15 @@ export function PostPage() {
 			return;
 		}
 		if (!isAdmin && nextVisible) {
-			alert('隐藏后不可再设为可见，请联系管理员');
-			return;
+			const remain = getAuthorPublishRemainingMs(post);
+			if (remain <= 0) {
+				alert(
+					post.author_publish_until
+						? '超过 30 分钟未设为可见，已失去设为可见权限，请联系管理员'
+						: '隐藏后不可再设为可见，请联系管理员'
+				);
+				return;
+			}
 		}
 		if (!nextVisible) {
 			const ok = confirm(
@@ -297,6 +324,9 @@ export function PostPage() {
 					: '确定隐藏这篇帖子吗？隐藏后将不可再设置为可见，仅管理员可恢复。'
 			);
 			if (!ok) return;
+		} else if (!isAdmin) {
+			const ok = confirm('设为可见后将不可再编辑，请确认内容已审核无误。');
+			if (!ok) return;
 		}
 		try {
 			await apiFetch(`/posts/${post.id}/visibility`, {
@@ -304,7 +334,15 @@ export function PostPage() {
 				headers: getSecurityHeaders('POST'),
 				body: JSON.stringify({ visible: nextVisible })
 			});
-			setPost((prev) => (prev ? { ...prev, is_visible: nextVisible ? 1 : 0 } : prev));
+			setPost((prev) =>
+				prev
+					? {
+							...prev,
+							is_visible: nextVisible ? 1 : 0,
+							author_publish_until: nextVisible ? null : prev.author_publish_until
+						}
+					: prev
+			);
 			alert(nextVisible ? '已设为可见' : '已隐藏');
 		} catch (e: any) {
 			alert(String(e?.message || e));
@@ -435,6 +473,13 @@ export function PostPage() {
 												已隐藏
 											</span>
 										) : null}
+										{user &&
+										user.id === post.author_id &&
+										getAuthorPublishRemainingMs(post, publishNowMs) > 0 ? (
+											<span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:text-amber-100">
+												审核倒计时 {formatCountdown(getAuthorPublishRemainingMs(post, publishNowMs))}
+											</span>
+										) : null}
 										{post.category_name ? (
 											<span className="inline-flex items-center rounded-full border border-white/40 bg-background/70 px-2 py-0.5 text-[11px] font-medium text-foreground backdrop-blur">
 												{post.category_name}
@@ -511,7 +556,9 @@ export function PostPage() {
 												<div className="absolute right-0 top-full z-[60] mt-2 max-h-64 w-44 overflow-y-auto rounded-md border bg-background p-1 shadow-lg">
 													{(user.role === 'admin' ||
 														(Number(post.is_visible ?? 1) === 1 &&
-															Number(post.site_featured ?? 0) !== 1)) ? (
+															Number(post.site_featured ?? 0) !== 1) ||
+														(user.id === post.author_id &&
+															getAuthorPublishRemainingMs(post, publishNowMs) > 0)) ? (
 														<button
 															type="button"
 															className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
@@ -681,107 +728,115 @@ export function PostPage() {
 									<div className="space-y-3">
 										{organizeComments(comments).map((c) => (
 											<div key={c.id} className="rounded-md border p-3">
-												<div className="flex items-center justify-between gap-2">
-													<div className="text-sm">
-														<span className="inline-flex items-center gap-2">
-															{c.avatar_url ? (
-																<img
-																	src={c.avatar_url}
-																	alt=""
-																	className="h-6 w-6 rounded-full object-cover"
-																	loading="lazy"
-																	referrerPolicy="no-referrer"
-																/>
-															) : (
-																<span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground">
-																	<User className="h-4 w-4" />
-																</span>
-															)}
-															<span className="font-medium text-foreground">{c.username}</span>
-															{c.role === 'admin' ? (
-																<span className="inline-flex items-center gap-1 rounded border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
-																	<Shield className="h-3 w-3" />
-																	<span className="sr-only">管理员</span>
-																</span>
-															) : null}
-															{Number(c.is_featured ?? 0) === 1 ? (
-																<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-rose-500 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm">
-																	<Star className="h-3 w-3 fill-white" />
-																	官网精选
-																</span>
-															) : null}
-															<span className="text-muted-foreground">{formatDate(c.created_at)}</span>
+												<div className="flex gap-2">
+													{c.avatar_url ? (
+														<img
+															src={c.avatar_url}
+															alt=""
+															className="mt-0.5 h-7 w-7 shrink-0 rounded-full object-cover"
+															loading="lazy"
+															referrerPolicy="no-referrer"
+														/>
+													) : (
+														<span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground">
+															<User className="h-4 w-4" />
 														</span>
-													</div>
-													<div className="flex items-center gap-2">
-														<Button variant="ghost" size="sm" onClick={() => setReplyTo(c)}>
-															<Reply className="h-4 w-4" />
-															<span className="sr-only">回复</span>
-														</Button>
-														{user?.role === 'admin' ? (
-															<Button
-																variant="ghost"
-																size="sm"
-																onClick={() => void toggleCommentFeature(c.id, Number(c.is_featured ?? 0) === 1)}
-																title={Number(c.is_featured ?? 0) === 1 ? '取消官网精选' : '设为官网精选'}
-															>
-																<Star className={`h-4 w-4 ${Number(c.is_featured ?? 0) === 1 ? 'fill-sky-500 text-sky-600' : ''}`} />
-																<span className="sr-only">
-																	{Number(c.is_featured ?? 0) === 1 ? '取消官网精选' : '设为官网精选'}
-																</span>
-															</Button>
-														) : null}
-														{user && (user.role === 'admin' || user.id === c.author_id) ? (
-															<Button variant="ghost" size="sm" onClick={() => deleteComment(c.id)}>
-																<Trash2 className="h-4 w-4" />
-																<span className="sr-only">删除</span>
-															</Button>
-														) : null}
-													</div>
-												</div>
-												<div className="mt-2 whitespace-pre-wrap text-sm">{c.content}</div>
-												{c.replies && c.replies.length ? (
-													<div className="mt-3 space-y-2 border-l pl-3">
-														{c.replies.map((r) => (
-															<div key={r.id} className="rounded-md bg-muted/30 p-2">
-																<div className="flex items-center justify-between gap-2">
-																	<div className="text-xs">
-																		<span className="inline-flex items-center gap-2">
+													)}
+													<div className="min-w-0 flex-1">
+														<div className="flex items-start justify-between gap-2">
+															<div className="min-w-0 space-y-1">
+																<div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
+																	<span className="font-medium text-foreground">{c.username}</span>
+																	{c.role === 'admin' ? (
+																		<span className="inline-flex items-center gap-1 rounded border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
+																			<Shield className="h-3 w-3" />
+																			<span className="sr-only">管理员</span>
+																		</span>
+																	) : null}
+																	{Number(c.is_featured ?? 0) === 1 ? (
+																		<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-rose-500 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm">
+																			<Star className="h-3 w-3 fill-white" />
+																			官网精选
+																		</span>
+																	) : null}
+																</div>
+																<div className="text-xs text-muted-foreground">{formatDate(c.created_at)}</div>
+															</div>
+															<div className="-mr-1 -mt-1 flex shrink-0 items-center">
+																<Button variant="ghost" size="sm" onClick={() => setReplyTo(c)}>
+																	<Reply className="h-4 w-4" />
+																	<span className="sr-only">回复</span>
+																</Button>
+																{user?.role === 'admin' ? (
+																	<Button
+																		variant="ghost"
+																		size="sm"
+																		onClick={() => void toggleCommentFeature(c.id, Number(c.is_featured ?? 0) === 1)}
+																		title={Number(c.is_featured ?? 0) === 1 ? '取消官网精选' : '设为官网精选'}
+																	>
+																		<Star className={`h-4 w-4 ${Number(c.is_featured ?? 0) === 1 ? 'fill-sky-500 text-sky-600' : ''}`} />
+																		<span className="sr-only">
+																			{Number(c.is_featured ?? 0) === 1 ? '取消官网精选' : '设为官网精选'}
+																		</span>
+																	</Button>
+																) : null}
+																{user && (user.role === 'admin' || user.id === c.author_id) ? (
+																	<Button variant="ghost" size="sm" onClick={() => deleteComment(c.id)}>
+																		<Trash2 className="h-4 w-4" />
+																		<span className="sr-only">删除</span>
+																	</Button>
+																) : null}
+															</div>
+														</div>
+														<div className="mt-2 whitespace-pre-wrap text-sm">{c.content}</div>
+														{c.replies && c.replies.length ? (
+															<div className="mt-3 space-y-2 border-l pl-3">
+																{c.replies.map((r) => (
+																	<div key={r.id} className="rounded-md bg-muted/30 p-2">
+																		<div className="flex gap-2">
 																			{r.avatar_url ? (
 																				<img
 																					src={r.avatar_url}
 																					alt=""
-																					className="h-5 w-5 rounded-full object-cover"
+																					className="mt-0.5 h-5 w-5 shrink-0 rounded-full object-cover"
 																					loading="lazy"
 																					referrerPolicy="no-referrer"
 																				/>
 																			) : (
-																				<span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground">
+																				<span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground">
 																					<User className="h-3.5 w-3.5" />
 																				</span>
 																			)}
-																			<span className="font-medium text-foreground">{r.username}</span>
-																			{r.role === 'admin' ? (
-																				<span className="inline-flex items-center gap-1 rounded border border-indigo-500/30 bg-indigo-500/10 px-1 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
-																					<Shield className="h-3 w-3" />
-																					<span className="sr-only">管理员</span>
-																				</span>
-																			) : null}
-																			<span className="text-muted-foreground">{formatDate(r.created_at)}</span>
-																		</span>
+																			<div className="min-w-0 flex-1">
+																				<div className="flex items-start justify-between gap-2">
+																					<div className="min-w-0 space-y-0.5">
+																						<div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+																							<span className="font-medium text-foreground">{r.username}</span>
+																							{r.role === 'admin' ? (
+																								<span className="inline-flex items-center gap-1 rounded border border-indigo-500/30 bg-indigo-500/10 px-1 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
+																									<Shield className="h-3 w-3" />
+																									<span className="sr-only">管理员</span>
+																								</span>
+																							) : null}
+																						</div>
+																						<div className="text-[11px] text-muted-foreground">{formatDate(r.created_at)}</div>
+																					</div>
+																					{user && (user.role === 'admin' || user.id === r.author_id) ? (
+																						<Button variant="ghost" size="sm" className="-mr-1 -mt-1 shrink-0" onClick={() => deleteComment(r.id)}>
+																							<Trash2 className="h-4 w-4" />
+																							<span className="sr-only">删除</span>
+																						</Button>
+																					) : null}
+																				</div>
+																				<div className="mt-1 whitespace-pre-wrap text-sm">{r.content}</div>
+																			</div>
+																		</div>
 																	</div>
-																	{user && (user.role === 'admin' || user.id === r.author_id) ? (
-																		<Button variant="ghost" size="sm" onClick={() => deleteComment(r.id)}>
-																			<Trash2 className="h-4 w-4" />
-																			<span className="sr-only">删除</span>
-																		</Button>
-																	) : null}
-																</div>
-																<div className="mt-1 whitespace-pre-wrap text-sm">{r.content}</div>
+																))}
 															</div>
-														))}
+														) : null}
 													</div>
-												) : null}
+												</div>
 											</div>
 										))}
 									</div>

@@ -30,6 +30,8 @@ export type Post = {
 	is_pinned?: number;
 	/** 1=可见（默认），0=隐藏；作者仅可隐藏且不可再显示；官网同步仅取可见帖 */
 	is_visible?: number;
+	/** 发帖时未勾选可见时写入；到期前作者可设为可见，到期或已发布后清空 */
+	author_publish_until?: string | null;
 	/** 1=官网精选（仅 admin）；精选后作者不可隐藏/删除 */
 	site_featured?: number;
 	view_count?: number;
@@ -94,4 +96,28 @@ export function formatDate(dateString: string | null | undefined) {
 		hour: '2-digit',
 		minute: '2-digit'
 	});
+}
+
+export function parseApiTimestamp(dateString: string | null | undefined): number | null {
+	if (!dateString) return null;
+	const ms = Date.parse(dateString.endsWith('Z') ? dateString : `${dateString}Z`);
+	return Number.isNaN(ms) ? null : ms;
+}
+
+/** Remaining ms for author to first-publish a draft (is_visible=0 with author_publish_until). */
+export function getAuthorPublishRemainingMs(
+	post: Pick<Post, 'is_visible' | 'author_publish_until'>,
+	nowMs = Date.now()
+): number {
+	if (Number(post.is_visible ?? 1) === 1) return 0;
+	const until = parseApiTimestamp(post.author_publish_until);
+	if (until == null) return 0;
+	return Math.max(0, until - nowMs);
+}
+
+export function formatCountdown(ms: number): string {
+	const total = Math.max(0, Math.ceil(ms / 1000));
+	const m = Math.floor(total / 60);
+	const s = total % 60;
+	return `${m}:${String(s).padStart(2, '0')}`;
 }
