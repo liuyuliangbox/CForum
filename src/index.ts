@@ -1852,6 +1852,68 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			}
 		}
 
+		// POST /api/posts/:id/comments
+		if (url.pathname.match(/^\/api\/posts\/\d+\/comments$/) && method === 'POST') {
+			const postId = url.pathname.split('/')[3];
+			try {
+				const userPayload = await authenticate(request);
+				const body = (await request.json()) as any;
+
+				const ip = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
+				if (!(await checkTurnstile(body, ip))) {
+					return jsonResponse({ error: 'Turnstile verification failed' }, 403);
+				}
+
+				let content = String(body?.content || '');
+				const parentId = body?.parent_id == null || body?.parent_id === '' ? null : Number(body.parent_id);
+
+				if (!content) return jsonResponse({ error: 'Missing content' }, 400);
+				if (isVisuallyEmpty(content)) return jsonResponse({ error: 'Content cannot be empty' }, 400);
+				if (hasInvisibleCharacters(content)) return jsonResponse({ error: 'Content contains invalid invisible characters' }, 400);
+				if (content.length > 3000) return jsonResponse({ error: 'Content too long (Max 3000 chars)' }, 400);
+				if (hasControlCharacters(content)) return jsonResponse({ error: 'Content contains invalid control characters' }, 400);
+
+				const post = await env.cforum_db.prepare('SELECT id FROM posts WHERE id = ?').bind(postId).first();
+				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
+
+				if (parentId != null) {
+					if (!Number.isFinite(parentId)) return jsonResponse({ error: 'Invalid parent comment' }, 400);
+					const parent = await env.cforum_db
+						.prepare('SELECT id, post_id FROM comments WHERE id = ?')
+						.bind(parentId)
+						.first<any>();
+					if (!parent || String(parent.post_id) !== String(postId)) {
+						return jsonResponse({ error: 'Parent comment not found' }, 400);
+					}
+				}
+
+				content = content
+					.replace(/&/g, '&amp;')
+					.replace(/</g, '&lt;')
+					.replace(/>/g, '&gt;')
+					.replace(/"/g, '&quot;')
+					.replace(/'/g, '&#039;');
+
+				const { success, meta } = await env.cforum_db
+					.prepare('INSERT INTO comments (post_id, parent_id, author_id, content) VALUES (?, ?, ?, ?)')
+					.bind(postId, parentId, userPayload.id, content.trim())
+					.run();
+
+				await security.logAudit(
+					userPayload.id,
+					'CREATE_COMMENT',
+					'comment',
+					String(meta?.last_row_id || 'new'),
+					{ post_id: Number(postId), parent_id: parentId },
+					request
+				);
+
+				return jsonResponse({ success, id: meta?.last_row_id ?? null }, 201);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
 		// DELETE /api/comments/:id
 		if (url.pathname.match(/^\/api\/comments\/\d+$/) && method === 'DELETE') {
 			const id = url.pathname.split('/').pop();
