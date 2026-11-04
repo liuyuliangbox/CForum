@@ -45,6 +45,8 @@ export function AdminPage() {
 	const [editUsername, setEditUsername] = React.useState('');
 	const [editAvatarUrl, setEditAvatarUrl] = React.useState('');
 	const [editPassword, setEditPassword] = React.useState('');
+	const [editError, setEditError] = React.useState('');
+	const [editAvatarIsDataUri, setEditAvatarIsDataUri] = React.useState(false);
 
 	React.useEffect(() => {
 		if (!token) window.location.href = '/login';
@@ -164,33 +166,51 @@ export function AdminPage() {
 	}
 
 	function openEdit(u: any) {
+		const avatar = String(u.avatar_url || '');
+		const isDataUri = avatar.startsWith('data:image/');
 		setEditUserId(u.id);
 		setEditEmail(u.email || '');
 		setEditUsername(u.username || '');
-		setEditAvatarUrl(u.avatar_url || '');
+		setEditAvatarUrl(isDataUri ? '' : avatar);
+		setEditAvatarIsDataUri(isDataUri);
 		setEditPassword('');
+		setEditError('');
 		setEditOpen(true);
 	}
 
 	async function saveEdit() {
 		if (!editUserId) return;
 		setLoading(true);
+		setEditError('');
 		setError('');
+		if (editPassword && (editPassword.length < 8 || editPassword.length > 16)) {
+			setEditError('密码必须为 8-16 个字符');
+			setLoading(false);
+			return;
+		}
 		try {
+			const payload: Record<string, unknown> = {
+				email: editEmail || undefined,
+				username: editUsername || undefined,
+				password: editPassword || undefined
+			};
+			if (editAvatarIsDataUri && !editAvatarUrl.trim()) {
+				// Legacy data-URI avatar: ask backend to migrate/regenerate onto R2
+				payload.avatar_url = '';
+			} else {
+				payload.avatar_url = editAvatarUrl;
+			}
 			await apiFetch(`/admin/users/${editUserId}/update`, {
 				method: 'POST',
 				headers: getSecurityHeaders('POST'),
-				body: JSON.stringify({
-					email: editEmail || undefined,
-					username: editUsername || undefined,
-					avatar_url: editAvatarUrl,
-					password: editPassword || undefined
-				})
+				body: JSON.stringify(payload)
 			});
 			setEditOpen(false);
 			await refresh();
 		} catch (e: any) {
-			setError(String(e?.message || e));
+			const msg = String(e?.message || e);
+			setEditError(msg);
+			setError(msg);
 		} finally {
 			setLoading(false);
 		}
@@ -547,12 +567,21 @@ export function AdminPage() {
 							</CardContent>
 						</Card>
 
-						<Dialog open={editOpen} onOpenChange={setEditOpen}>
+						<Dialog
+							open={editOpen}
+							onOpenChange={(open) => {
+								setEditOpen(open);
+								if (!open) setEditError('');
+							}}
+						>
 							<DialogContent>
 								<DialogHeader>
 									<DialogTitle>编辑用户</DialogTitle>
 									<DialogDescription>修改用户名/邮箱/头像/密码</DialogDescription>
 								</DialogHeader>
+								{editError ? (
+									<div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">{editError}</div>
+								) : null}
 								<div className="grid gap-4 py-4">
 									<div className="grid gap-2">
 										<Label htmlFor="edit-username">用户名</Label>
@@ -564,11 +593,28 @@ export function AdminPage() {
 									</div>
 									<div className="grid gap-2">
 										<Label htmlFor="edit-avatar">头像 URL</Label>
-										<Input id="edit-avatar" value={editAvatarUrl} onChange={(e) => setEditAvatarUrl(e.target.value)} />
+										<Input
+											id="edit-avatar"
+											value={editAvatarUrl}
+											onChange={(e) => {
+												setEditAvatarUrl(e.target.value);
+												setEditAvatarIsDataUri(false);
+											}}
+											placeholder={editAvatarIsDataUri ? '当前为内嵌默认头像，保存后会迁移到图床' : 'https://... 或 /r2/...，留空用默认头像'}
+										/>
+										{editAvatarIsDataUri ? (
+											<p className="text-xs text-muted-foreground">检测到旧版内嵌头像，保存时会自动上传到 R2。</p>
+										) : null}
 									</div>
 									<div className="grid gap-2">
-										<Label htmlFor="edit-password">新密码 (留空不变)</Label>
-										<Input id="edit-password" value={editPassword} onChange={(e) => setEditPassword(e.target.value)} />
+										<Label htmlFor="edit-password">新密码 (8-16 字符，留空不变)</Label>
+										<Input
+											id="edit-password"
+											type="password"
+											autoComplete="new-password"
+											value={editPassword}
+											onChange={(e) => setEditPassword(e.target.value)}
+										/>
 									</div>
 								</div>
 								<DialogFooter>

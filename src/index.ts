@@ -1,7 +1,7 @@
 
 import { sendEmail } from './smtp';
-import { generateIdenticon } from './identicon';
-import { uploadImage, deleteImage, listAllKeys, getPublicUrl, getKeyFromUrl, S3Env } from './s3';
+import { generateIdenticonSvg } from './identicon';
+import { uploadImage, deleteImage, listAllKeys, getPublicUrl, getKeyFromUrl, uploadAvatarBytes, uploadAvatarDataUri, S3Env } from './s3';
 import * as OTPAuth from 'otpauth';
 import { Security, UserPayload } from './security';
 
@@ -124,6 +124,27 @@ export default {
 			
 			console.warn(`⚠️ BASE_URL not configured and no X-Original-URL header, falling back to request origin: ${url.origin}`);
 			return url.origin;
+		};
+
+		const r2PublicBase = () => ((env as any).BUCKET ? `${getBaseUrl()}/r2` : undefined);
+
+		const createDefaultAvatarUrl = async (userId: string | number, seed?: string) => {
+			const svg = await generateIdenticonSvg(String(seed ?? userId));
+			return uploadAvatarBytes(env as unknown as S3Env, userId, svg, 'image/svg+xml', `identicon-${userId}.svg`, r2PublicBase());
+		};
+
+		const normalizeAvatarUrl = async (userId: string | number, avatarUrl: string) => {
+			const value = String(avatarUrl || '').trim();
+			if (!value) return createDefaultAvatarUrl(userId);
+			if (value.startsWith('data:image/')) {
+				return uploadAvatarDataUri(env as unknown as S3Env, userId, value, r2PublicBase());
+			}
+			if (value.startsWith('/r2/')) return value;
+			if (/^https?:\/\//i.test(value)) {
+				if (value.length > 500) throw new Error('Avatar URL too long (Max 500 chars)');
+				return value;
+			}
+			throw new Error('Invalid Avatar URL (Must start with http://, https:// or /r2/)');
 		};
 
 		// CORS headers helper
@@ -658,13 +679,27 @@ export default {
 
 				let newAvatarUrl = currentUser.avatar_url;
 				if (avatar_url !== undefined) {
-					if (avatar_url === '' || avatar_url === null) {
-						// Generate Identicon
-						newAvatarUrl = await generateIdenticon(String(user_id));
-					} else {
-						if (avatar_url.length > 500) return jsonResponse({ error: 'Avatar URL too long (Max 500 chars)' }, 400);
-						if (!/^https?:\/\//i.test(avatar_url) && !avatar_url.startsWith('data:image/svg+xml')) return jsonResponse({ error: 'Invalid Avatar URL (Must start with http:// or https://)' }, 400);
-						newAvatarUrl = avatar_url;
+					try {
+						if (avatar_url === '' || avatar_url === null) {
+							newAvatarUrl = await createDefaultAvatarUrl(user_id);
+						} else if (typeof avatar_url === 'string' && avatar_url.startsWith('data:image/')) {
+							newAvatarUrl = await normalizeAvatarUrl(user_id, avatar_url);
+						} else if (currentUser.avatar_url && avatar_url === currentUser.avatar_url) {
+							newAvatarUrl = currentUser.avatar_url.startsWith('data:image/')
+								? await normalizeAvatarUrl(user_id, currentUser.avatar_url)
+								: currentUser.avatar_url;
+						} else {
+							newAvatarUrl = await normalizeAvatarUrl(user_id, String(avatar_url));
+						}
+					} catch (avatarErr: any) {
+						return jsonResponse({ error: String(avatarErr?.message || avatarErr) }, 400);
+					}
+				} else if (currentUser.avatar_url && String(currentUser.avatar_url).startsWith('data:image/')) {
+					// Migrate legacy data-URI avatars to R2 on profile save
+					try {
+						newAvatarUrl = await normalizeAvatarUrl(user_id, String(currentUser.avatar_url));
+					} catch (avatarErr: any) {
+						return jsonResponse({ error: String(avatarErr?.message || avatarErr) }, 400);
 					}
 				}
 
@@ -1011,7 +1046,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const body = await request.json() as any;
 				const { password, email, username, avatar_url } = body;
 
-				if (password && (password.length < 8 || password.length > 16)) return jsonResponse({ error: 'Password must be 8-16 characters' }, 400);
+				if (password && (password.length < 8 || password.length > 16)) {
+					return jsonResponse({ error: '密码必须为 8-16 个字符' }, 400);
+				}
 
 				if (password) {
 					const hash = await hashPassword(password);
@@ -1022,15 +1059,13 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					await env.cforum_db.prepare('UPDATE users SET email = ? WHERE id = ?').bind(email, id).run();
 				}
 				if (avatar_url !== undefined) {
-					// Allow clearing avatar with empty string or null -> Force Regenerate Default
-					if (!avatar_url) {
-						// Reset to Default
-						const identicon = await generateIdenticon(String(id));
-						await env.cforum_db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(identicon, id).run();
-					} else {
-						if (avatar_url.length > 500) return jsonResponse({ error: 'Avatar URL too long (Max 500 chars)' }, 400);
-						if (!/^https?:\/\//i.test(avatar_url) && !avatar_url.startsWith('data:image/svg+xml')) return jsonResponse({ error: 'Invalid Avatar URL' }, 400);
-						await env.cforum_db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(avatar_url, id).run();
+					try {
+						const nextAvatar = !avatar_url
+							? await createDefaultAvatarUrl(id)
+							: await normalizeAvatarUrl(id, String(avatar_url));
+						await env.cforum_db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(nextAvatar, id).run();
+					} catch (avatarErr: any) {
+						return jsonResponse({ error: String(avatarErr?.message || avatarErr) }, 400);
 					}
 
 					// Notify Avatar Change
@@ -1565,17 +1600,24 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				).bind(email, username, passwordHash, verificationToken).run();
 
 				if (success) {
-					// Generate Default Avatar (Identicon)
-					// Use ID if available, otherwise fallback to Username
 					const userId = meta?.last_row_id;
 					if (userId) {
-						const identicon = await generateIdenticon(String(userId));
-						await env.cforum_db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(identicon, userId).run();
+						try {
+							const avatar = await createDefaultAvatarUrl(userId);
+							await env.cforum_db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(avatar, userId).run();
+						} catch (avatarErr) {
+							console.error('Failed to create default avatar on register', avatarErr);
+						}
 					} else {
-						// Fallback if ID retrieval fails (rare in D1)
-						const identicon = await generateIdenticon(username);
-						// We don't have ID easily without query, but we can update by username or just skip
-						await env.cforum_db.prepare('UPDATE users SET avatar_url = ? WHERE username = ?').bind(identicon, username).run();
+						try {
+							const row = await env.cforum_db.prepare('SELECT id FROM users WHERE username = ?').bind(username).first<{ id: number }>();
+							if (row?.id) {
+								const avatar = await createDefaultAvatarUrl(row.id, username);
+								await env.cforum_db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').bind(avatar, row.id).run();
+							}
+						} catch (avatarErr) {
+							console.error('Failed to create default avatar on register fallback', avatarErr);
+						}
 					}
 				}
 

@@ -211,3 +211,29 @@ export function getPublicUrl(env: S3Env, key: string, baseUrl?: string): string 
     }
     return `${env.AWS_ENDPOINT}/${env.AWS_BUCKET}/${key}`;
 }
+
+/** Upload SVG/PNG data-URI or raw SVG text as an avatar; returns a short public URL. */
+export async function uploadAvatarBytes(
+	env: S3Env,
+	userId: string | number,
+	bytes: ArrayBuffer | Uint8Array | string,
+	contentType: string,
+	filename: string,
+	publicBase?: string
+): Promise<string> {
+	const blobParts: BlobPart[] = [typeof bytes === 'string' ? bytes : bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)];
+	const file = new File(blobParts, filename, { type: contentType });
+	const key = await uploadImage(env, file, userId, 'general', 'avatar');
+	return getPublicUrl(env, key, publicBase);
+}
+
+export async function uploadAvatarDataUri(env: S3Env, userId: string | number, dataUri: string, publicBase?: string): Promise<string> {
+	const match = dataUri.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+	if (!match) throw new Error('Invalid avatar data URI');
+	const contentType = match[1];
+	const binary = atob(match[2]);
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+	const ext = contentType.includes('svg') ? 'svg' : contentType.includes('png') ? 'png' : contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : 'bin';
+	return uploadAvatarBytes(env, userId, bytes, contentType, `avatar-${Date.now()}.${ext}`, publicBase);
+}
