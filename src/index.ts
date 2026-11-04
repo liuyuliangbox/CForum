@@ -48,6 +48,25 @@ function extractImageUrls(content: string): string[] {
 	return urls;
 }
 
+function extractCoverUrl(content: string): string | null {
+	const md = String(content || '').match(/!\[[^\]]*\]\(([^)\s]+)\)/i);
+	const html = String(content || '').match(/<img[^>]+src=["']([^"']+)["']/i);
+	const raw = md?.[1] || html?.[1] || '';
+	if (!raw) return null;
+	if (/^https?:\/\//i.test(raw) || raw.startsWith('/') || raw.startsWith('data:')) return raw;
+	return `/r2/${raw.replace(/^\/+/, '')}`;
+}
+
+/** Run heavy schema/seed work once per Worker isolate — was the main cause of multi-second API latency. */
+let schemaEnsurePromise: Promise<void> | null = null;
+
+/** Bumped when admin changes categories/settings; returned by /api/posts for client cache invalidation. */
+let metaCacheVersion = 1;
+function bumpMetaCacheVersion() {
+	metaCacheVersion += 1;
+	return metaCacheVersion;
+}
+
 // Utility to hash password
 async function hashPassword(password: string): Promise<string> {
 	const myText = new TextEncoder().encode(password);
@@ -162,10 +181,10 @@ export default {
 		}
 
 		// Helper to return JSON response with CORS
-		const jsonResponse = (data: any, status = 200) => {
+		const jsonResponse = (data: any, status = 200, extraHeaders?: Record<string, string>) => {
 			return Response.json(data, {
 				status,
-				headers: corsHeaders,
+				headers: { ...corsHeaders, ...(extraHeaders || {}) },
 			});
 		};
 
@@ -185,7 +204,20 @@ export default {
 		}
 
 		// Ensure the database schema exists before anything else.
+		// Hot path: one settings read. Full CREATE/ALTER/seed only when schema_version lags.
+		const SCHEMA_VERSION = 7;
 		const ensureSchema = async () => {
+			try {
+				const ver = await env.cforum_db
+					.prepare(`SELECT value FROM settings WHERE key = 'schema_version'`)
+					.first<{ value: string }>();
+				if (ver && Number(ver.value) === SCHEMA_VERSION) {
+					return;
+				}
+			} catch {
+				// settings/posts may not exist yet — fall through to init
+			}
+
 			let schemaReady = false;
 			try {
 				await env.cforum_db.prepare('SELECT 1 FROM posts LIMIT 1').first();
@@ -452,6 +484,18 @@ export default {
 				}
 			} catch (e) {
 				console.error('Failed to seed legacy site logs', e);
+			}
+
+			try {
+				await env.cforum_db
+					.prepare(
+						`INSERT INTO settings (key, value) VALUES ('schema_version', ?)
+						 ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+					)
+					.bind(String(SCHEMA_VERSION))
+					.run();
+			} catch (e) {
+				console.error('Failed to persist schema_version', e);
 			}
 		};
 
@@ -2039,16 +2083,24 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const sortDir = sortDirRaw === 'asc' ? 'ASC' : 'DESC';
 				
 				let query = `SELECT 
-                        posts.*, 
+                        posts.id, posts.author_id, posts.title, posts.content, posts.category_id,
+                        posts.is_pinned, posts.is_visible, posts.author_publish_until, posts.site_featured,
+                        posts.view_count, posts.created_at,
                         users.username as author_name, 
                         users.avatar_url as author_avatar,
                         users.role as author_role,
                         categories.name as category_name,
-                        (SELECT COUNT(*) FROM likes WHERE likes.post_id = posts.id) as like_count,
-                        (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) as comment_count
+                        IFNULL(like_agg.like_count, 0) as like_count,
+                        IFNULL(comment_agg.comment_count, 0) as comment_count
                      FROM posts 
                      JOIN users ON posts.author_id = users.id 
-                     LEFT JOIN categories ON posts.category_id = categories.id`;
+                     LEFT JOIN categories ON posts.category_id = categories.id
+                     LEFT JOIN (
+                        SELECT post_id, COUNT(*) AS like_count FROM likes GROUP BY post_id
+                     ) like_agg ON like_agg.post_id = posts.id
+                     LEFT JOIN (
+                        SELECT post_id, COUNT(*) AS comment_count FROM comments GROUP BY post_id
+                     ) comment_agg ON comment_agg.post_id = posts.id`;
                 
                 let countQuery = `SELECT COUNT(*) as total FROM posts LEFT JOIN categories ON posts.category_id = categories.id`;
 
@@ -2130,7 +2182,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const isAdmin = viewer?.role === 'admin';
 				const post = await env.cforum_db.prepare(
 					`SELECT 
-                        posts.*, 
+                        posts.id, posts.author_id, posts.title, posts.content, posts.category_id,
+                        posts.is_pinned, posts.is_visible, posts.author_publish_until, posts.site_featured,
+                        posts.view_count, posts.created_at,
                         users.username as author_name, 
                         users.avatar_url as author_avatar,
                         users.role as author_role,
