@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, EyeOff, Heart, MessageCircle, MoreVertical, Pin, RefreshCw, Search, Shield, Star, Trash2, User, X } from 'lucide-react';
 
+import { AdminCooldownMenuItems } from '@/components/admin-cooldown-menu';
 import { MarkdownToolbar } from '@/components/markdown-toolbar';
 import { TurnstileWidget } from '@/components/turnstile';
 import { PageShell } from '@/components/page-shell';
@@ -1042,6 +1043,14 @@ export function IndexPage() {
 																			<Trash2 className="h-4 w-4" />
 																			删除
 																		</button>
+																	) : null}
+																	{isAdmin && p.author_role !== 'admin' ? (
+																		<AdminCooldownMenuItems
+																			userId={p.author_id}
+																			username={p.author_name}
+																			disabled={actionLoading}
+																			onDone={() => setAdminMenuPostId(null)}
+																		/>
 																	) : null}
 																	{isAdmin ? (
 																		<>

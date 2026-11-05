@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { ArrowLeft, Eye, EyeOff, Heart, MoreVertical, Pin, Pencil, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
 
+import { AdminCooldownMenuItems, AdminCooldownTrigger } from '@/components/admin-cooldown-menu';
 import { MarkdownToolbar } from '@/components/markdown-toolbar';
 import { TurnstileWidget } from '@/components/turnstile';
 import { PageShell } from '@/components/page-shell';
@@ -670,6 +671,13 @@ export function PostPage() {
 															删除
 														</button>
 													) : null}
+													{user.role === 'admin' && post.author_role !== 'admin' ? (
+														<AdminCooldownMenuItems
+															userId={post.author_id}
+															username={post.author_name}
+															onDone={() => setAdminMenuOpen(false)}
+														/>
+													) : null}
 													{user.role === 'admin' ? (
 														<>
 															<div className="my-1 h-px bg-border" />
@@ -827,6 +835,9 @@ export function PostPage() {
 																		</span>
 																	</Button>
 																) : null}
+																{user?.role === 'admin' && c.role !== 'admin' ? (
+																	<AdminCooldownTrigger userId={c.author_id} username={c.username} />
+																) : null}
 																{user && (user.role === 'admin' || user.id === c.author_id) ? (
 																	<Button variant="ghost" size="sm" onClick={() => deleteComment(c.id)}>
 																		<Trash2 className="h-4 w-4" />
@@ -868,12 +879,17 @@ export function PostPage() {
 																						</div>
 																						<div className="text-[11px] text-muted-foreground">{formatDate(r.created_at)}</div>
 																					</div>
-																					{user && (user.role === 'admin' || user.id === r.author_id) ? (
-																						<Button variant="ghost" size="sm" className="-mr-1 -mt-1 shrink-0" onClick={() => deleteComment(r.id)}>
-																							<Trash2 className="h-4 w-4" />
-																							<span className="sr-only">删除</span>
-																						</Button>
-																					) : null}
+																					<div className="-mr-1 -mt-1 flex shrink-0 items-center">
+																						{user?.role === 'admin' && r.role !== 'admin' ? (
+																							<AdminCooldownTrigger userId={r.author_id} username={r.username} />
+																						) : null}
+																						{user && (user.role === 'admin' || user.id === r.author_id) ? (
+																							<Button variant="ghost" size="sm" onClick={() => deleteComment(r.id)}>
+																								<Trash2 className="h-4 w-4" />
+																								<span className="sr-only">删除</span>
+																							</Button>
+																						) : null}
+																					</div>
 																				</div>
 																				<div className="mt-1 whitespace-pre-wrap text-sm">{r.content}</div>
 																			</div>

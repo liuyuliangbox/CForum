@@ -192,3 +192,22 @@ export async function recordModerationReject(
 export async function clearPostingCooldown(db: D1Database, userId: number): Promise<void> {
 	await db.prepare(`UPDATE users SET posting_cooldown_until = NULL WHERE id = ?`).bind(userId).run();
 }
+
+/** 允许的管理员手动冷却时长（小时） */
+export const ADMIN_COOLDOWN_HOURS = [1, 24, 168, 8760] as const;
+
+export type AdminCooldownHours = (typeof ADMIN_COOLDOWN_HOURS)[number];
+
+export function isAdminCooldownHours(value: unknown): value is AdminCooldownHours {
+	return ADMIN_COOLDOWN_HOURS.includes(Number(value) as AdminCooldownHours);
+}
+
+export async function setPostingCooldownHours(
+	db: D1Database,
+	userId: number,
+	hours: AdminCooldownHours
+): Promise<{ cooldownUntil: string }> {
+	const until = formatDbTime(Date.now() + hours * 60 * 60 * 1000);
+	await db.prepare(`UPDATE users SET posting_cooldown_until = ? WHERE id = ?`).bind(until, userId).run();
+	return { cooldownUntil: until };
+}

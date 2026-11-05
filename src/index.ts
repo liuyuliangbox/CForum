@@ -15,7 +15,9 @@ import {
 	assertNotInCooldown,
 	assertPublishAllowed,
 	clearPostingCooldown,
-	recordModerationReject
+	isAdminCooldownHours,
+	recordModerationReject,
+	setPostingCooldownHours
 } from './rate-limit';
 
 interface DBUser {
@@ -2052,6 +2054,39 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				await clearPostingCooldown(env.cforum_db, Number(id));
 				await security.logAudit(userPayload.id, 'CLEAR_POSTING_COOLDOWN', 'user', id, {}, request);
 				return jsonResponse({ success: true });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/admin/users/:id/cooldown — body: { hours: 1|24|168|8760 }
+		if (url.pathname.match(/^\/api\/admin\/users\/\d+\/cooldown$/) && method === 'POST') {
+			const id = url.pathname.split('/')[4];
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const body = (await request.json()) as any;
+				if (!isAdminCooldownHours(body?.hours)) {
+					return jsonResponse({ error: '冷却时长无效（可选 1 / 24 / 168 / 8760 小时）' }, 400);
+				}
+				const target = await env.cforum_db
+					.prepare('SELECT id, role FROM users WHERE id = ?')
+					.bind(id)
+					.first<{ id: number; role: string }>();
+				if (!target) return jsonResponse({ error: '用户不存在' }, 404);
+				if (target.role === 'admin') {
+					return jsonResponse({ error: '不能给管理员账号加冷却' }, 403);
+				}
+				const result = await setPostingCooldownHours(env.cforum_db, Number(id), body.hours);
+				await security.logAudit(
+					userPayload.id,
+					'SET_POSTING_COOLDOWN',
+					'user',
+					id,
+					{ hours: body.hours, cooldown_until: result.cooldownUntil },
+					request
+				);
+				return jsonResponse({ success: true, ...result });
 			} catch (e) {
 				return handleError(e);
 			}
