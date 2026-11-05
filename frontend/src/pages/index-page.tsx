@@ -32,6 +32,7 @@ export function IndexPage() {
 	const [categories, setCategories] = React.useState<Category[]>([]);
 	const [selectedCategory, setSelectedCategory] = React.useState<string>('');
 	const [siteFeaturedOnly, setSiteFeaturedOnly] = React.useState(false);
+	const [mineOnly, setMineOnly] = React.useState(false);
 	const [searchInput, setSearchInput] = React.useState<string>('');
 	const [searchQuery, setSearchQuery] = React.useState<string>('');
 	const [posts, setPosts] = React.useState<Post[]>([]);
@@ -324,11 +325,12 @@ export function IndexPage() {
 				const sortDir = sortOption === 'time_asc' ? 'asc' : 'desc';
 				const categoryParam = selectedCategory ? `&category_id=${encodeURIComponent(selectedCategory)}` : '';
 				const featuredParam = siteFeaturedOnly ? '&site_featured=1' : '';
+				const mineParam = mineOnly ? '&mine=1' : '';
 				const searchParam = searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : '';
 				const sortParam = `&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}`;
 				const headers = getSecurityHeaders('GET', null);
 				const res = await fetch(
-					`/api/posts?limit=${pageLimit}&offset=${offset}${categoryParam}${featuredParam}${searchParam}${sortParam}`,
+					`/api/posts?limit=${pageLimit}&offset=${offset}${categoryParam}${featuredParam}${mineParam}${searchParam}${sortParam}`,
 					{ headers }
 				);
 				if (!res.ok) {
@@ -358,8 +360,15 @@ export function IndexPage() {
 				setLoading(false);
 			}
 		},
-		[selectedCategory, siteFeaturedOnly, searchQuery, sortOption, token]
+		[selectedCategory, siteFeaturedOnly, mineOnly, searchQuery, sortOption, token]
 	);
+
+	React.useEffect(() => {
+		if (!user && mineOnly) {
+			setMineOnly(false);
+			setPageOffset(0);
+		}
+	}, [user, mineOnly]);
 
 	React.useEffect(() => {
 		fetchCategories();
@@ -689,10 +698,24 @@ export function IndexPage() {
 								<Star className="h-3.5 w-3.5" />
 								官网精选
 							</button>
-							<Button variant="outline" size="sm" onClick={() => fetchPosts(0)} disabled={loading}>
-								<RefreshCw className="h-4 w-4" />
-								<span className="sr-only">刷新</span>
-							</Button>
+							{user ? (
+								<button
+									type="button"
+									aria-pressed={mineOnly}
+									className={
+										mineOnly
+											? 'inline-flex h-9 items-center gap-1 rounded-md border-0 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 px-3 text-sm font-medium text-white shadow-sm'
+											: 'inline-flex h-9 items-center gap-1 rounded-md border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted/60'
+									}
+									onClick={() => {
+										setMineOnly((v) => !v);
+										setPageOffset(0);
+									}}
+								>
+									<User className="h-3.5 w-3.5" />
+									由我发布
+								</button>
+							) : null}
 						</div>
 					</div>
 
@@ -713,6 +736,16 @@ export function IndexPage() {
 						<Button variant="outline" size="sm" type="submit" disabled={loading}>
 							<Search className="h-4 w-4" />
 							<span className="sr-only">搜索</span>
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							type="button"
+							onClick={() => fetchPosts(pageOffset)}
+							disabled={loading}
+						>
+							<RefreshCw className="h-4 w-4" />
+							<span className="sr-only">刷新</span>
 						</Button>
 						{searchInput || searchQuery ? (
 							<Button

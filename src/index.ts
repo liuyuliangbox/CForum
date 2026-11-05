@@ -2390,6 +2390,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const siteFeaturedOnly =
 					url.searchParams.get('site_featured') === '1' ||
 					url.searchParams.get('site_featured') === 'true';
+				const mineOnly =
+					url.searchParams.get('mine') === '1' || url.searchParams.get('mine') === 'true';
 				const q = (url.searchParams.get('q') || url.searchParams.get('query') || '').trim();
 				const sortByRaw = (url.searchParams.get('sort_by') || 'time').trim().toLowerCase();
 				const sortDirRaw = (url.searchParams.get('sort_dir') || 'desc').trim().toLowerCase();
@@ -2436,6 +2438,15 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 
 				if (siteFeaturedOnly) {
 					conditions.push(`IFNULL(posts.site_featured, 0) = 1`);
+				}
+
+				if (mineOnly) {
+					if (!viewer) {
+						return jsonResponse({ error: 'Login required' }, 401);
+					}
+					conditions.push(`posts.author_id = ?`);
+					params.push(viewer.id);
+					countParams.push(viewer.id);
 				}
 
 				// Visibility: guests see public only; authors see own hidden; admins see all
