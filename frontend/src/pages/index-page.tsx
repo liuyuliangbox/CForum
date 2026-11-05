@@ -1047,9 +1047,15 @@ export function IndexPage() {
 												置顶
 											</span>
 											{Number(p.site_featured ?? 0) === 1 ? (
-												<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-rose-500 px-2 py-0.5 text-[11px] font-medium text-white shadow-sm">
+												<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-cyan-500 to-indigo-600 px-2 py-0.5 text-[11px] font-medium text-white shadow-sm">
 													<Star className="h-3 w-3 fill-white" />
 													官网精选
+												</span>
+											) : null}
+											{user && user.id === p.author_id ? (
+												<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 px-2 py-0.5 text-[11px] font-medium text-white shadow-sm">
+													<User className="h-3 w-3" />
+													由我发布
 												</span>
 											) : null}
 											{Number(p.is_visible ?? 1) === 0 ? (
@@ -1135,9 +1141,15 @@ export function IndexPage() {
 															</span>
 														) : null}
 														{isFeatured ? (
-															<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-rose-500 px-2 py-0.5 text-xs font-medium text-white shadow-sm">
+															<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-cyan-500 to-indigo-600 px-2 py-0.5 text-xs font-medium text-white shadow-sm">
 																<Star className="h-3.5 w-3.5 fill-white" />
 																官网精选
+															</span>
+														) : null}
+														{isOwner ? (
+															<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 px-2 py-0.5 text-xs font-medium text-white shadow-sm">
+																<User className="h-3.5 w-3.5" />
+																由我发布
 															</span>
 														) : null}
 														{isHidden ? (
