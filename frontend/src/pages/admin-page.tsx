@@ -36,7 +36,7 @@ export function AdminPage() {
 		working_title_note: '正式名称待定 / Working Title',
 		product_tagline: '单人修道，一回合定势。江湖未定，先把战斗打通。',
 		site_description: '单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。',
-		forum_link_label: 'bbs.aridjaya.eu.org',
+		community_home_url: 'https://bbs.aridjaya.eu.org',
 		footer_rights: '保留所有权利。',
 		friend_links: [{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }] as Array<{
 			label: string;
@@ -120,7 +120,7 @@ export function AdminPage() {
 				site_description:
 					settings.site_description ||
 					'单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。',
-				forum_link_label: settings.forum_link_label || 'bbs.aridjaya.eu.org',
+				community_home_url: settings.community_home_url || 'https://bbs.aridjaya.eu.org',
 				footer_rights: settings.footer_rights || '保留所有权利。',
 				friend_links: friendLinks.length
 					? friendLinks
@@ -469,16 +469,22 @@ export function AdminPage() {
 											maxLength={300}
 										/>
 									</div>
-									<div className="space-y-2">
-										<Label htmlFor="forum-link-label">页脚社区链接文案（兼容旧字段）</Label>
+									<div className="space-y-2 sm:col-span-2">
+										<Label htmlFor="community-home-url">社区首页地址</Label>
 										<Input
-											id="forum-link-label"
-											value={systemSettings.forum_link_label}
-											onChange={(e) => setSystemSettings((s) => ({ ...s, forum_link_label: e.target.value }))}
-											maxLength={120}
+											id="community-home-url"
+											value={systemSettings.community_home_url}
+											onChange={(e) =>
+												setSystemSettings((s) => ({ ...s, community_home_url: e.target.value }))
+											}
+											maxLength={300}
+											placeholder="https://bbs.aridjaya.eu.org"
 										/>
+										<p className="text-xs text-muted-foreground">
+											官网「最新社区精选 → 查看更多」跳转到此地址
+										</p>
 									</div>
-									<div className="space-y-2">
+									<div className="space-y-2 sm:col-span-2">
 										<Label htmlFor="footer-rights">版权后缀</Label>
 										<Input
 											id="footer-rights"

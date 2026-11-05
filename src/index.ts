@@ -123,7 +123,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -450,7 +450,7 @@ export default {
 						'site_description',
 						'单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。'
 					],
-					['forum_link_label', 'bbs.aridjaya.eu.org'],
+					['community_home_url', 'https://bbs.aridjaya.eu.org'],
 					['footer_rights', '保留所有权利。'],
 					[
 						'friend_links',
@@ -757,7 +757,7 @@ export default {
 			'working_title_note',
 			'product_tagline',
 			'site_description',
-			'forum_link_label',
+			'community_home_url',
 			'footer_rights',
 			'friend_links'
 		]);
@@ -770,7 +770,7 @@ export default {
 			working_title_note: '正式名称待定 / Working Title',
 			product_tagline: '单人修道，一回合定势。江湖未定，先把战斗打通。',
 			site_description: '单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。',
-			forum_link_label: 'bbs.aridjaya.eu.org',
+			community_home_url: 'https://bbs.aridjaya.eu.org',
 			footer_rights: '保留所有权利。',
 			friend_links: DEFAULT_FRIEND_LINKS_JSON
 		};
@@ -883,7 +883,7 @@ export default {
 					working_title_note,
 					product_tagline,
 					site_description,
-					forum_link_label,
+					community_home_url,
 					footer_rights,
 					friend_links
 				} = body;
@@ -903,7 +903,10 @@ export default {
 				if (working_title_note !== undefined) batch.push(stmt.bind('working_title_note', String(working_title_note).slice(0, 120)));
 				if (product_tagline !== undefined) batch.push(stmt.bind('product_tagline', String(product_tagline).slice(0, 160)));
 				if (site_description !== undefined) batch.push(stmt.bind('site_description', String(site_description).slice(0, 300)));
-				if (forum_link_label !== undefined) batch.push(stmt.bind('forum_link_label', String(forum_link_label).slice(0, 120)));
+				if (community_home_url !== undefined) {
+					const url = String(community_home_url || '').trim().replace(/\/+$/, '').slice(0, 300);
+					batch.push(stmt.bind('community_home_url', url || SITE_META_DEFAULTS.community_home_url));
+				}
 				if (footer_rights !== undefined) batch.push(stmt.bind('footer_rights', String(footer_rights).slice(0, 80)));
 				if (friend_links !== undefined) batch.push(stmt.bind('friend_links', normalizeFriendLinksJson(friend_links)));
 				
@@ -1562,6 +1565,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					}
 				}
 				meta.friend_links = normalizeFriendLinksJson(meta.friend_links);
+				meta.community_home_url = String(meta.community_home_url || SITE_META_DEFAULTS.community_home_url)
+					.trim()
+					.replace(/\/+$/, '') || SITE_META_DEFAULTS.community_home_url;
 				return jsonResponse(meta);
 			} catch (e) {
 				return handleError(e);
