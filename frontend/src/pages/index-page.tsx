@@ -990,7 +990,7 @@ export function IndexPage() {
 									</span>
 									{!newVisible ? (
 										<span className="pl-6 text-xs text-muted-foreground">
-											未勾选时将进入核对倒计时：15 分钟内仍可编辑，请尽快核对；逾期未设为可见，将失去该权限
+											如未勾选，发布后将进入核对倒计时：15 分钟内仍可编辑，请尽快核对并设置可见；逾期未设为可见，将失去该权限
 										</span>
 									) : null}
 								</label>
