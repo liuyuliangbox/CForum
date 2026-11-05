@@ -11,6 +11,12 @@ import {
 	invalidateModerationWordCache,
 	serializeAllowedLinkHosts
 } from './content-policy';
+import {
+	assertNotInCooldown,
+	assertPublishAllowed,
+	clearPostingCooldown,
+	recordModerationReject
+} from './rate-limit';
 
 interface DBUser {
     id: number;
@@ -130,7 +136,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -432,6 +438,11 @@ export default {
 				).run();
 			} catch (e) {
 				console.error('Failed to ensure moderation_words table', e);
+			}
+			try {
+				await env.cforum_db.prepare(`ALTER TABLE users ADD COLUMN posting_cooldown_until TIMESTAMP`).run();
+			} catch {
+				// column already exists
 			}
 			try {
 				const needsSortBackfill = await env.cforum_db
@@ -2020,8 +2031,27 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const userPayload = await authenticate(request);
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
-				const { results } = await env.cforum_db.prepare('SELECT id, email, username, role, verified, created_at, avatar_url FROM users ORDER BY created_at DESC').all();
+				const { results } = await env.cforum_db
+					.prepare(
+						`SELECT id, email, username, role, verified, created_at, avatar_url, posting_cooldown_until
+						 FROM users ORDER BY created_at DESC`
+					)
+					.all();
 				return jsonResponse(results);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/admin/users/:id/clear-cooldown
+		if (url.pathname.match(/^\/api\/admin\/users\/\d+\/clear-cooldown$/) && method === 'POST') {
+			const id = url.pathname.split('/')[4];
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				await clearPostingCooldown(env.cforum_db, Number(id));
+				await security.logAudit(userPayload.id, 'CLEAR_POSTING_COOLDOWN', 'user', id, {}, request);
+				return jsonResponse({ success: true });
 			} catch (e) {
 				return handleError(e);
 			}
@@ -2789,10 +2819,25 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (content.length > 3000) return jsonResponse({ error: 'Content too long (Max 3000 chars)' }, 400);
 				if (hasControlCharacters(title) || hasControlCharacters(content)) return jsonResponse({ error: 'Title or content contains invalid control characters' }, 400);
 
+				const gate = await assertNotInCooldown(env.cforum_db, userPayload);
+				if (!gate.ok) return jsonResponse({ error: gate.error }, gate.status);
+
 				const moderationErr = await assertContentModeration(env.cforum_db, `${title}\n${content}`, {
 					skip: userPayload.role === 'admin'
 				});
-				if (moderationErr) return jsonResponse({ error: moderationErr }, 400);
+				if (moderationErr) {
+					if (userPayload.role !== 'admin') {
+						const hit = await recordModerationReject(env.cforum_db, {
+							userId: userPayload.id,
+							reason: moderationErr,
+							path: 'edit',
+							ip: request.headers.get('CF-Connecting-IP') || 'unknown'
+						});
+						const suffix = hit.cooldownUntil ? '；已进入发言冷却' : '';
+						return jsonResponse({ error: moderationErr + suffix }, 400);
+					}
+					return jsonResponse({ error: moderationErr }, 400);
+				}
 
 				// Validate Category + announcement restriction
 				const category = await env.cforum_db
@@ -2905,10 +2950,25 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (content.length > 3000) return jsonResponse({ error: 'Content too long (Max 3000 chars)' }, 400);
 				if (hasControlCharacters(content)) return jsonResponse({ error: 'Content contains invalid control characters' }, 400);
 
+				const gate = await assertPublishAllowed(env.cforum_db, userPayload, 'comment');
+				if (!gate.ok) return jsonResponse({ error: gate.error }, gate.status);
+
 				const moderationErr = await assertContentModeration(env.cforum_db, content, {
 					skip: userPayload.role === 'admin'
 				});
-				if (moderationErr) return jsonResponse({ error: moderationErr }, 400);
+				if (moderationErr) {
+					if (userPayload.role !== 'admin') {
+						const hit = await recordModerationReject(env.cforum_db, {
+							userId: userPayload.id,
+							reason: moderationErr,
+							path: 'comment',
+							ip: request.headers.get('CF-Connecting-IP') || 'unknown'
+						});
+						const suffix = hit.cooldownUntil ? '；已进入发言冷却' : '';
+						return jsonResponse({ error: moderationErr + suffix }, 400);
+					}
+					return jsonResponse({ error: moderationErr }, 400);
+				}
 
 				const post = await env.cforum_db.prepare('SELECT id FROM posts WHERE id = ?').bind(postId).first();
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
@@ -3085,10 +3145,25 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 
 				if (hasControlCharacters(title) || hasControlCharacters(content)) return jsonResponse({ error: 'Title or content contains invalid control characters' }, 400);
 
+				const gate = await assertPublishAllowed(env.cforum_db, userPayload, 'post');
+				if (!gate.ok) return jsonResponse({ error: gate.error }, gate.status);
+
 				const moderationErr = await assertContentModeration(env.cforum_db, `${title}\n${content}`, {
 					skip: userPayload.role === 'admin'
 				});
-				if (moderationErr) return jsonResponse({ error: moderationErr }, 400);
+				if (moderationErr) {
+					if (userPayload.role !== 'admin') {
+						const hit = await recordModerationReject(env.cforum_db, {
+							userId: userPayload.id,
+							reason: moderationErr,
+							path: 'post',
+							ip: request.headers.get('CF-Connecting-IP') || 'unknown'
+						});
+						const suffix = hit.cooldownUntil ? '；已进入发言冷却' : '';
+						return jsonResponse({ error: moderationErr + suffix }, 400);
+					}
+					return jsonResponse({ error: moderationErr }, 400);
+				}
 
 				// HTML Escape Content (Backend Enforcement)
 				content = content

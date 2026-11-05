@@ -23,7 +23,16 @@ export function AdminPage() {
 
 	const [stats, setStats] = React.useState<{ users: number; posts: number; comments: number } | null>(null);
 	const [users, setUsers] = React.useState<
-		Array<{ id: number; email: string; username: string; role: string; verified: number; created_at: string; avatar_url?: string | null }>
+		Array<{
+			id: number;
+			email: string;
+			username: string;
+			role: string;
+			verified: number;
+			created_at: string;
+			avatar_url?: string | null;
+			posting_cooldown_until?: string | null;
+		}>
 	>([]);
 	const [categories, setCategories] = React.useState<Category[]>([]);
 	const [systemSettings, setSystemSettings] = React.useState({
@@ -426,6 +435,31 @@ export function AdminPage() {
 		try {
 			await apiFetch(`/admin/users/${id}/resend`, { method: 'POST', headers: getSecurityHeaders('POST'), body: JSON.stringify({}) });
 			alert('已发送');
+		} catch (e: any) {
+			setError(String(e?.message || e));
+		} finally {
+			setLoading(false);
+		}
+	}
+
+	function cooldownActive(until: string | null | undefined): boolean {
+		if (!until) return false;
+		const raw = String(until).trim();
+		const ms = Date.parse(raw.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`);
+		return !Number.isNaN(ms) && ms > Date.now();
+	}
+
+	async function clearCooldown(id: number) {
+		if (!confirm('确认解除该用户的发言冷却？')) return;
+		setLoading(true);
+		setError('');
+		try {
+			await apiFetch(`/admin/users/${id}/clear-cooldown`, {
+				method: 'POST',
+				headers: getSecurityHeaders('POST'),
+				body: JSON.stringify({})
+			});
+			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
 		} finally {
@@ -962,6 +996,7 @@ export function AdminPage() {
 												<th className="px-3 py-2">邮箱</th>
 												<th className="px-3 py-2">角色</th>
 												<th className="px-3 py-2">已验证</th>
+												<th className="px-3 py-2">冷却</th>
 												<th className="px-3 py-2">操作</th>
 											</tr>
 										</thead>
@@ -997,6 +1032,15 @@ export function AdminPage() {
 													<td className="px-3 py-2">{u.role}</td>
 													<td className="px-3 py-2">{u.verified ? '是' : '否'}</td>
 													<td className="px-3 py-2">
+														{cooldownActive(u.posting_cooldown_until) ? (
+															<span className="text-xs text-amber-700 dark:text-amber-400" title={String(u.posting_cooldown_until)}>
+																冷却中
+															</span>
+														) : (
+															<span className="text-xs text-muted-foreground">—</span>
+														)}
+													</td>
+													<td className="px-3 py-2">
 														<div className="flex flex-wrap gap-2">
 															<Button
 																variant="outline"
@@ -1006,6 +1050,16 @@ export function AdminPage() {
 															>
 																编辑
 															</Button>
+															{cooldownActive(u.posting_cooldown_until) ? (
+																<Button
+																	variant="outline"
+																	size="sm"
+																	className="border-amber-500 text-amber-800 hover:bg-amber-50 hover:text-amber-900 dark:text-amber-400 dark:hover:bg-amber-950/40"
+																	onClick={() => void clearCooldown(u.id)}
+																>
+																	解除冷却
+																</Button>
+															) : null}
 															{!u.verified ? (
 																<>
 																	<Button
