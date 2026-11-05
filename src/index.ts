@@ -123,7 +123,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -445,12 +445,17 @@ export default {
 					['site_brand', 'liuyuliangbox'],
 					['project_codename', 'Project Turn'],
 					['working_title_note', '正式名称待定 / Working Title'],
+					['product_tagline', '单人修道，一回合定势。江湖未定，先把战斗打通。'],
 					[
 						'site_description',
 						'单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。'
 					],
 					['forum_link_label', 'bbs.aridjaya.eu.org'],
-					['footer_rights', '保留所有权利。']
+					['footer_rights', '保留所有权利。'],
+					[
+						'friend_links',
+						JSON.stringify([{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }])
+					]
 				];
 				for (const [key, value] of siteBrandDefaults) {
 					await env.cforum_db
@@ -750,17 +755,47 @@ export default {
 			'site_brand',
 			'project_codename',
 			'working_title_note',
+			'product_tagline',
 			'site_description',
 			'forum_link_label',
-			'footer_rights'
+			'footer_rights',
+			'friend_links'
+		]);
+		const DEFAULT_FRIEND_LINKS_JSON = JSON.stringify([
+			{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }
 		]);
 		const SITE_META_DEFAULTS: Record<string, string> = {
 			site_brand: 'liuyuliangbox',
 			project_codename: 'Project Turn',
 			working_title_note: '正式名称待定 / Working Title',
+			product_tagline: '单人修道，一回合定势。江湖未定，先把战斗打通。',
 			site_description: '单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。',
 			forum_link_label: 'bbs.aridjaya.eu.org',
-			footer_rights: '保留所有权利。'
+			footer_rights: '保留所有权利。',
+			friend_links: DEFAULT_FRIEND_LINKS_JSON
+		};
+
+		const normalizeFriendLinksJson = (raw: unknown): string => {
+			let list: unknown = raw;
+			if (typeof raw === 'string') {
+				try {
+					list = JSON.parse(raw);
+				} catch {
+					return DEFAULT_FRIEND_LINKS_JSON;
+				}
+			}
+			if (!Array.isArray(list)) return DEFAULT_FRIEND_LINKS_JSON;
+			const cleaned = list
+				.map((item) => {
+					if (!item || typeof item !== 'object') return null;
+					const label = String((item as any).label || '').trim().slice(0, 80);
+					const url = String((item as any).url || '').trim().slice(0, 300);
+					if (!label || !url) return null;
+					return { label, url };
+				})
+				.filter(Boolean)
+				.slice(0, 20);
+			return cleaned.length > 0 ? JSON.stringify(cleaned) : DEFAULT_FRIEND_LINKS_JSON;
 		};
 
 		// GET /api/config
@@ -846,9 +881,11 @@ export default {
 					site_brand,
 					project_codename,
 					working_title_note,
+					product_tagline,
 					site_description,
 					forum_link_label,
-					footer_rights
+					footer_rights,
+					friend_links
 				} = body;
 				
 				const stmt = env.cforum_db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
@@ -864,9 +901,11 @@ export default {
 				if (site_brand !== undefined) batch.push(stmt.bind('site_brand', String(site_brand).slice(0, 80)));
 				if (project_codename !== undefined) batch.push(stmt.bind('project_codename', String(project_codename).slice(0, 80)));
 				if (working_title_note !== undefined) batch.push(stmt.bind('working_title_note', String(working_title_note).slice(0, 120)));
+				if (product_tagline !== undefined) batch.push(stmt.bind('product_tagline', String(product_tagline).slice(0, 160)));
 				if (site_description !== undefined) batch.push(stmt.bind('site_description', String(site_description).slice(0, 300)));
 				if (forum_link_label !== undefined) batch.push(stmt.bind('forum_link_label', String(forum_link_label).slice(0, 120)));
 				if (footer_rights !== undefined) batch.push(stmt.bind('footer_rights', String(footer_rights).slice(0, 80)));
+				if (friend_links !== undefined) batch.push(stmt.bind('friend_links', normalizeFriendLinksJson(friend_links)));
 				
 				if (batch.length > 0) await env.cforum_db.batch(batch);
 				bumpMetaCacheVersion();
@@ -1522,6 +1561,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						meta[key] = String((row as any).value ?? meta[key]);
 					}
 				}
+				meta.friend_links = normalizeFriendLinksJson(meta.friend_links);
 				return jsonResponse(meta);
 			} catch (e) {
 				return handleError(e);
@@ -1601,6 +1641,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						category_name: row.category_name,
 						author_name: row.author_name,
 						is_pinned: Number(row.is_pinned) === 1,
+						site_featured: Number(row.site_featured) === 1,
 						created_at: row.created_at
 					};
 				});
@@ -1656,6 +1697,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 
 				return jsonResponse({
 					...post,
+					is_pinned: Number((post as any).is_pinned) === 1,
+					site_featured: Number((post as any).site_featured) === 1,
 					featured_comments: (featuredComments || []).map((row: any) => ({
 						id: row.id,
 						content: row.content,

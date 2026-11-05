@@ -34,9 +34,14 @@ export function AdminPage() {
 		site_brand: 'liuyuliangbox',
 		project_codename: 'Project Turn',
 		working_title_note: '正式名称待定 / Working Title',
+		product_tagline: '单人修道，一回合定势。江湖未定，先把战斗打通。',
 		site_description: '单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。',
 		forum_link_label: 'bbs.aridjaya.eu.org',
-		footer_rights: '保留所有权利。'
+		footer_rights: '保留所有权利。',
+		friend_links: [{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }] as Array<{
+			label: string;
+			url: string;
+		}>
 	});
 
 	const [newCategoryName, setNewCategoryName] = React.useState('');
@@ -82,6 +87,23 @@ export function AdminPage() {
 			setStats(s);
 			setUsers(u as any);
 			setCategories(c);
+			let friendLinks: Array<{ label: string; url: string }> = [
+				{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }
+			];
+			try {
+				const raw = settings.friend_links;
+				const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+				if (Array.isArray(parsed) && parsed.length > 0) {
+					friendLinks = parsed
+						.map((item: any) => ({
+							label: String(item?.label || '').trim(),
+							url: String(item?.url || '').trim()
+						}))
+						.filter((x: { label: string; url: string }) => x.label && x.url);
+				}
+			} catch {
+				/* keep default */
+			}
 			setSystemSettings({
 				turnstile_enabled: !!settings.turnstile_enabled,
 				notify_on_user_delete: !!settings.notify_on_user_delete,
@@ -93,11 +115,16 @@ export function AdminPage() {
 				site_brand: settings.site_brand || 'liuyuliangbox',
 				project_codename: settings.project_codename || 'Project Turn',
 				working_title_note: settings.working_title_note || '正式名称待定 / Working Title',
+				product_tagline:
+					settings.product_tagline || '单人修道，一回合定势。江湖未定，先把战斗打通。',
 				site_description:
 					settings.site_description ||
 					'单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。',
 				forum_link_label: settings.forum_link_label || 'bbs.aridjaya.eu.org',
-				footer_rights: settings.footer_rights || '保留所有权利。'
+				footer_rights: settings.footer_rights || '保留所有权利。',
+				friend_links: friendLinks.length
+					? friendLinks
+					: [{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }]
 			});
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -424,6 +451,16 @@ export function AdminPage() {
 										/>
 									</div>
 									<div className="space-y-2 sm:col-span-2">
+										<Label htmlFor="product-tagline">产品一句话（首页）</Label>
+										<Input
+											id="product-tagline"
+											value={systemSettings.product_tagline}
+											onChange={(e) => setSystemSettings((s) => ({ ...s, product_tagline: e.target.value }))}
+											maxLength={160}
+											placeholder="单人修道，一回合定势……"
+										/>
+									</div>
+									<div className="space-y-2 sm:col-span-2">
 										<Label htmlFor="site-description">SEO 描述</Label>
 										<Input
 											id="site-description"
@@ -433,7 +470,7 @@ export function AdminPage() {
 										/>
 									</div>
 									<div className="space-y-2">
-										<Label htmlFor="forum-link-label">页脚社区链接文案</Label>
+										<Label htmlFor="forum-link-label">页脚社区链接文案（兼容旧字段）</Label>
 										<Input
 											id="forum-link-label"
 											value={systemSettings.forum_link_label}
@@ -450,6 +487,65 @@ export function AdminPage() {
 											maxLength={80}
 										/>
 									</div>
+								</div>
+								<Separator />
+								<p className="text-sm font-medium">友链管理</p>
+								<p className="text-xs text-muted-foreground">
+									出现在官网页尾，与顶部导航栏目独立；可放社区、镜像、合作站点等
+								</p>
+								<div className="space-y-3">
+									{systemSettings.friend_links.map((link, idx) => (
+										<div key={idx} className="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto]">
+											<Input
+												placeholder="显示名称"
+												value={link.label}
+												onChange={(e) =>
+													setSystemSettings((s) => {
+														const next = [...s.friend_links];
+														next[idx] = { ...next[idx], label: e.target.value };
+														return { ...s, friend_links: next };
+													})
+												}
+												maxLength={80}
+											/>
+											<Input
+												placeholder="https://"
+												value={link.url}
+												onChange={(e) =>
+													setSystemSettings((s) => {
+														const next = [...s.friend_links];
+														next[idx] = { ...next[idx], url: e.target.value };
+														return { ...s, friend_links: next };
+													})
+												}
+												maxLength={300}
+											/>
+											<Button
+												type="button"
+												variant="outline"
+												onClick={() =>
+													setSystemSettings((s) => ({
+														...s,
+														friend_links: s.friend_links.filter((_, i) => i !== idx)
+													}))
+												}
+											>
+												删除
+											</Button>
+										</div>
+									))}
+									<Button
+										type="button"
+										variant="secondary"
+										onClick={() =>
+											setSystemSettings((s) => ({
+												...s,
+												friend_links: [...s.friend_links, { label: '', url: '' }]
+											}))
+										}
+									>
+										添加友链
+									</Button>
 								</div>
 								<Separator />
 								<label className="flex items-center gap-2 text-sm">
