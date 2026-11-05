@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import { invalidateConfigCache } from '@/hooks/use-config';
 import { apiFetch, getSecurityHeaders, type Category } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
@@ -43,7 +44,8 @@ export function AdminPage() {
 		friend_links: [{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }] as Array<{
 			label: string;
 			url: string;
-		}>
+		}>,
+		allowed_link_hosts_text: 'aridjaya.eu.org'
 	});
 
 	const [newCategoryName, setNewCategoryName] = React.useState('');
@@ -115,6 +117,27 @@ export function AdminPage() {
 			} catch {
 				/* keep default */
 			}
+			let allowedHostsText = 'aridjaya.eu.org';
+			try {
+				const rawHosts = settings.allowed_link_hosts;
+				const parsedHosts =
+					typeof rawHosts === 'string'
+						? rawHosts.trim().startsWith('[')
+							? JSON.parse(rawHosts)
+							: rawHosts.split(/[\n,]+/)
+						: rawHosts;
+				if (Array.isArray(parsedHosts) && parsedHosts.length) {
+					allowedHostsText = parsedHosts.map((h: unknown) => String(h || '').trim()).filter(Boolean).join('\n');
+				} else if (typeof rawHosts === 'string' && rawHosts.trim() && !rawHosts.trim().startsWith('[')) {
+					allowedHostsText = rawHosts
+						.split(/[\n,]+/)
+						.map((h: string) => h.trim())
+						.filter(Boolean)
+						.join('\n');
+				}
+			} catch {
+				allowedHostsText = 'aridjaya.eu.org';
+			}
 			setSystemSettings({
 				turnstile_enabled: !!settings.turnstile_enabled,
 				notify_on_user_delete: !!settings.notify_on_user_delete,
@@ -135,7 +158,8 @@ export function AdminPage() {
 				footer_rights: settings.footer_rights || '保留所有权利。',
 				friend_links: friendLinks.length
 					? friendLinks
-					: [{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }]
+					: [{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }],
+				allowed_link_hosts_text: allowedHostsText || 'aridjaya.eu.org'
 			});
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -153,10 +177,17 @@ export function AdminPage() {
 		setLoading(true);
 		setError('');
 		try {
+			const allowedHosts = systemSettings.allowed_link_hosts_text
+				.split(/[\n,]+/)
+				.map((s) => s.trim())
+				.filter(Boolean);
 			await apiFetch('/admin/settings', {
 				method: 'POST',
 				headers: getSecurityHeaders('POST'),
-				body: JSON.stringify(systemSettings)
+				body: JSON.stringify({
+					...systemSettings,
+					allowed_link_hosts: allowedHosts.length ? allowedHosts : ['aridjaya.eu.org']
+				})
 			});
 			invalidateConfigCache();
 			alert('设置已保存');
@@ -653,6 +684,21 @@ export function AdminPage() {
 										手动验证通过时通知用户
 									</label>
 								</div>
+								<div className="space-y-2">
+									<Label htmlFor="allowed-link-hosts">链接域名白名单（一行一个）</Label>
+									<Textarea
+										id="allowed-link-hosts"
+										rows={4}
+										value={systemSettings.allowed_link_hosts_text}
+										onChange={(e) =>
+											setSystemSettings((s) => ({ ...s, allowed_link_hosts_text: e.target.value }))
+										}
+										placeholder={'aridjaya.eu.org\nexample.com'}
+									/>
+									<p className="text-xs text-muted-foreground">
+										普通用户外链仅允许这些域名及其子域；管理员发布不受限。默认 aridjaya.eu.org。
+									</p>
+								</div>
 								<Button onClick={saveSettings} disabled={loading}>
 									{loading ? '保存中...' : '保存设置'}
 								</Button>
@@ -665,7 +711,7 @@ export function AdminPage() {
 							</CardHeader>
 							<CardContent className="space-y-4">
 								<p className="text-sm text-muted-foreground">
-									发帖、改帖与评论命中敏感词将拒绝发布。外链仅允许 aridjaya.eu.org 及其子域。
+									普通用户发帖、改帖与评论命中敏感词将拒绝发布；管理员发布跳过审查。
 								</p>
 								<div className="flex flex-wrap items-end gap-3">
 									<div className="min-w-[220px] flex-1 space-y-2">

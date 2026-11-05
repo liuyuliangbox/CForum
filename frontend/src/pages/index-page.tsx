@@ -20,7 +20,6 @@ import {
 	type Post
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
-import { assertAllowedContentUrls } from '@/lib/content-policy';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
 import {
 	handleMarkdownEditorKeyDown,
@@ -408,8 +407,6 @@ export function IndexPage() {
 		if (!newCategoryId) return setCreateError('请选择分类');
 		if (newTitle.length > 30) return setCreateError('标题过长 (最多 30 字符)');
 		if (newContent.length > 3000) return setCreateError('内容过长 (最多 3000 字符)');
-		const urlErr = assertAllowedContentUrls(`${newTitle}\n${newContent}`);
-		if (urlErr) return setCreateError(urlErr);
 		if (turnstileActive && !turnstileToken) return setCreateError('请完成验证码验证');
 
 		setCreateLoading(true);

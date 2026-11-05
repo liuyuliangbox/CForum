@@ -83,8 +83,18 @@ export function insertTable(text: string, start: number, end: number): EditResul
 	return { text: next, selectionStart, selectionEnd };
 }
 
+export function insertLink(text: string, start: number, end: number, isImage = false): EditResult {
+	const selected = text.slice(start, end) || (isImage ? 'alt' : 'text');
+	const link = isImage ? `![${selected}](url)` : `[${selected}](url)`;
+	const next = text.slice(0, start) + link + text.slice(end);
+	const urlStart = start + (isImage ? 2 : 1) + selected.length + 2;
+	const urlEnd = urlStart + 3;
+	return { text: next, selectionStart: urlStart, selectionEnd: urlEnd };
+}
+
 export type MarkdownEditorAction =
 	| 'bold'
+	| 'italic'
 	| 'strike'
 	| 'underline'
 	| 'h2'
@@ -94,6 +104,7 @@ export type MarkdownEditorAction =
 	| 'ol'
 	| 'indent'
 	| 'outdent'
+	| 'link'
 	| 'inlineCode'
 	| 'codeBlock'
 	| 'table'
@@ -103,6 +114,8 @@ export function runMarkdownAction(text: string, start: number, end: number, acti
 	switch (action) {
 		case 'bold':
 			return wrapSelection(text, start, end, '**', '**', 'text');
+		case 'italic':
+			return wrapSelection(text, start, end, '*', '*', 'text');
 		case 'strike':
 			return wrapSelection(text, start, end, '~~', '~~', 'text');
 		case 'underline':
@@ -121,6 +134,8 @@ export function runMarkdownAction(text: string, start: number, end: number, acti
 			return indentLines(text, start, end);
 		case 'outdent':
 			return outdentLines(text, start, end);
+		case 'link':
+			return insertLink(text, start, end, false);
 		case 'inlineCode':
 			return wrapSelection(text, start, end, '`', '`', 'code');
 		case 'codeBlock':
@@ -165,6 +180,16 @@ export function handleMarkdownEditorKeyDown(
 
 	if (!shift && key === 'b') {
 		run('bold');
+		return;
+	}
+	if (!shift && key === 'i') {
+		if (!isAdmin) return;
+		run('italic');
+		return;
+	}
+	if (!shift && key === 'k') {
+		if (!isAdmin) return;
+		run('link');
 		return;
 	}
 	if (!shift && key === 'u') {

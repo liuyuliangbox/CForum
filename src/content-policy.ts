@@ -1,16 +1,69 @@
 import { Mint } from 'mint-filter';
 
-const ALLOWED_HOST_SUFFIX = 'aridjaya.eu.org';
+export const DEFAULT_ALLOWED_LINK_HOSTS = ['aridjaya.eu.org'];
+
 const URL_IN_TEXT_RE = /https?:\/\/[^\s<>"'`)\]]+/gi;
 const MD_LINK_RE = /!?\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 
-export function isAllowedContentHost(hostname: string): boolean {
-	const host = hostname.trim().toLowerCase().replace(/\.$/, '');
-	if (!host) return false;
-	return host === ALLOWED_HOST_SUFFIX || host.endsWith(`.${ALLOWED_HOST_SUFFIX}`);
+type HostCache = { signature: string; hosts: string[] };
+let hostCache: HostCache = { signature: '', hosts: DEFAULT_ALLOWED_LINK_HOSTS };
+
+type WordFilterCache = {
+	signature: string;
+	mint: Mint | null;
+};
+let wordFilterCache: WordFilterCache = { signature: '', mint: null };
+
+export function normalizeAllowedLinkHosts(raw: unknown): string[] {
+	let list: unknown = raw;
+	if (typeof raw === 'string') {
+		const trimmed = raw.trim();
+		if (!trimmed) return [...DEFAULT_ALLOWED_LINK_HOSTS];
+		if (trimmed.startsWith('[')) {
+			try {
+				list = JSON.parse(trimmed);
+			} catch {
+				list = trimmed.split(/[\n,]+/);
+			}
+		} else {
+			list = trimmed.split(/[\n,]+/);
+		}
+	}
+	if (!Array.isArray(list)) return [...DEFAULT_ALLOWED_LINK_HOSTS];
+	const cleaned = Array.from(
+		new Set(
+			list
+				.map((item) =>
+					String(item || '')
+						.trim()
+						.toLowerCase()
+						.replace(/^https?:\/\//, '')
+						.replace(/\/.*$/, '')
+						.replace(/:\d+$/, '')
+						.replace(/^\.+/, '')
+						.replace(/\.+$/, '')
+				)
+				.filter((host) => /^[a-z0-9.-]+$/.test(host) && host.includes('.'))
+		)
+	);
+	return cleaned.length ? cleaned : [...DEFAULT_ALLOWED_LINK_HOSTS];
 }
 
-export function isAllowedContentUrl(raw: string): boolean {
+export function serializeAllowedLinkHosts(hosts: string[]): string {
+	return JSON.stringify(normalizeAllowedLinkHosts(hosts));
+}
+
+export function isAllowedContentHost(hostname: string, suffixes: string[] = DEFAULT_ALLOWED_LINK_HOSTS): boolean {
+	const host = hostname.trim().toLowerCase().replace(/\.$/, '');
+	if (!host) return false;
+	return suffixes.some((suffix) => {
+		const s = suffix.trim().toLowerCase().replace(/\.$/, '');
+		if (!s) return false;
+		return host === s || host.endsWith(`.${s}`);
+	});
+}
+
+export function isAllowedContentUrl(raw: string, suffixes: string[] = DEFAULT_ALLOWED_LINK_HOSTS): boolean {
 	const value = String(raw || '').trim();
 	if (!value) return true;
 	if (value.startsWith('/') && !value.startsWith('//')) return true;
@@ -22,7 +75,7 @@ export function isAllowedContentUrl(raw: string): boolean {
 		const parsed = new URL(value, 'https://bbs.aridjaya.eu.org');
 		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
 		if (/^https?:\/\//i.test(value)) {
-			return isAllowedContentHost(parsed.hostname);
+			return isAllowedContentHost(parsed.hostname, suffixes);
 		}
 		return true;
 	} catch {
@@ -30,38 +83,45 @@ export function isAllowedContentUrl(raw: string): boolean {
 	}
 }
 
-export function findDisallowedContentUrls(text: string): string[] {
+export function findDisallowedContentUrls(text: string, suffixes: string[] = DEFAULT_ALLOWED_LINK_HOSTS): string[] {
 	const found = new Set<string>();
 	const source = String(text || '');
 
 	for (const match of source.matchAll(MD_LINK_RE)) {
 		const href = (match[2] || '').trim();
-		if (href && !isAllowedContentUrl(href)) found.add(href);
+		if (href && !isAllowedContentUrl(href, suffixes)) found.add(href);
 	}
 
 	for (const match of source.matchAll(URL_IN_TEXT_RE)) {
 		const href = (match[0] || '').replace(/[.,;:!?)]+$/, '');
-		if (href && !isAllowedContentUrl(href)) found.add(href);
+		if (href && !isAllowedContentUrl(href, suffixes)) found.add(href);
 	}
 
 	return Array.from(found);
 }
 
-export function assertAllowedContentUrls(text: string): string | null {
-	const bad = findDisallowedContentUrls(text);
+export function assertAllowedContentUrls(text: string, suffixes: string[] = DEFAULT_ALLOWED_LINK_HOSTS): string | null {
+	const bad = findDisallowedContentUrls(text, suffixes);
 	if (!bad.length) return null;
-	return '仅允许 aridjaya.eu.org 及其子域名链接';
+	const sample = suffixes.slice(0, 3).join('、') || DEFAULT_ALLOWED_LINK_HOSTS[0];
+	return `仅允许白名单域名及其子域名链接（当前：${sample}${suffixes.length > 3 ? '…' : ''}）`;
 }
-
-type WordFilterCache = {
-	signature: string;
-	mint: Mint | null;
-};
-
-let wordFilterCache: WordFilterCache = { signature: '', mint: null };
 
 export function invalidateModerationWordCache() {
 	wordFilterCache = { signature: '', mint: null };
+}
+
+export function invalidateAllowedLinkHostsCache() {
+	hostCache = { signature: '', hosts: DEFAULT_ALLOWED_LINK_HOSTS };
+}
+
+export async function getAllowedLinkHosts(db: D1Database): Promise<string[]> {
+	const row = await db.prepare(`SELECT value FROM settings WHERE key = 'allowed_link_hosts'`).first<{ value: string }>();
+	const signature = String(row?.value || '');
+	if (signature === hostCache.signature && hostCache.hosts.length) return hostCache.hosts;
+	const hosts = normalizeAllowedLinkHosts(signature || DEFAULT_ALLOWED_LINK_HOSTS);
+	hostCache = { signature, hosts };
+	return hosts;
 }
 
 export async function getModerationMint(db: D1Database): Promise<Mint | null> {
@@ -76,8 +136,15 @@ export async function getModerationMint(db: D1Database): Promise<Mint | null> {
 	return mint;
 }
 
-export async function assertContentModeration(db: D1Database, text: string): Promise<string | null> {
-	const urlErr = assertAllowedContentUrls(text);
+/** 普通用户强制审查；管理员请传 skip: true */
+export async function assertContentModeration(
+	db: D1Database,
+	text: string,
+	opts?: { skip?: boolean }
+): Promise<string | null> {
+	if (opts?.skip) return null;
+	const hosts = await getAllowedLinkHosts(db);
+	const urlErr = assertAllowedContentUrls(text, hosts);
 	if (urlErr) return urlErr;
 	const mint = await getModerationMint(db);
 	if (!mint) return null;

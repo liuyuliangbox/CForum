@@ -1,7 +1,17 @@
 import { marked } from 'marked';
 import createDOMPurify from 'dompurify';
 import { highlightElement } from '@speed-highlight/core';
-import { isAllowedContentUrl } from '@/lib/content-policy';
+
+/** 渲染侧只拦危险协议；域名白名单在写入时由后端审查（管理员豁免）。 */
+function isSafeRenderableUrl(raw: string): boolean {
+	const value = String(raw || '').trim();
+	if (!value) return false;
+	if (value.startsWith('/') && !value.startsWith('//')) return true;
+	if (value.startsWith('#')) return true;
+	if (/^(javascript|vbscript|data):/i.test(value)) return false;
+	if (/^https?:\/\//i.test(value)) return true;
+	return false;
+}
 
 function escapeHtml(text: string) {
 	return text
@@ -40,7 +50,7 @@ renderer.image = (({ href, title, text }: { href: string; title?: string | null;
 	if (resolved && !/^https?:\/\//i.test(resolved) && !resolved.startsWith('/') && !resolved.startsWith('data:')) {
 		resolved = `/r2/${resolved.replace(/^\/+/, '')}`;
 	}
-	if (!isAllowedContentUrl(resolved)) {
+	if (!isSafeRenderableUrl(resolved)) {
 		return `<span>${escapeHtml(text || resolved)}</span>`;
 	}
 	const src = escapeHtml(resolved);
@@ -52,7 +62,7 @@ renderer.image = (({ href, title, text }: { href: string; title?: string | null;
 }) as any;
 renderer.link = (({ href, title, text }: { href: string; title?: string | null; text: string }) => {
 	const label = escapeHtml(text || href || '');
-	if (!href || !isAllowedContentUrl(href)) {
+	if (!href || !isSafeRenderableUrl(href)) {
 		return `<span>${label}</span>`;
 	}
 	const safeHref = escapeHtml(href);

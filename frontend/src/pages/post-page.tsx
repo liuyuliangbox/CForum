@@ -20,7 +20,6 @@ import {
 	type Post
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
-import { assertAllowedContentUrls } from '@/lib/content-policy';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
 import {
 	handleMarkdownEditorKeyDown,
@@ -272,8 +271,6 @@ export function PostPage() {
 		const err = validateText(newComment, '评论');
 		if (err) return setCommentError(err);
 		if (newComment.length > 3000) return setCommentError('评论过长 (最多 3000 字符)');
-		const urlErr = assertAllowedContentUrls(newComment);
-		if (urlErr) return setCommentError(urlErr);
 		if (turnstileActive && !turnstileToken) return setCommentError('请完成验证码验证');
 
 		setCommentLoading(true);
@@ -467,8 +464,6 @@ export function PostPage() {
 		if (contentErr) return setEditError(contentErr);
 		if (editTitle.length > 30) return setEditError('标题过长 (最多 30 字符)');
 		if (editContent.length > 3000) return setEditError('内容过长 (最多 3000 字符)');
-		const urlErr = assertAllowedContentUrls(`${editTitle}\n${editContent}`);
-		if (urlErr) return setEditError(urlErr);
 
 		setEditLoading(true);
 		try {

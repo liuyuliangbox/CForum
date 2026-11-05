@@ -4,7 +4,13 @@ import { generateIdenticonSvg } from './identicon';
 import { uploadImage, deleteImage, listAllKeys, getPublicUrl, getKeyFromUrl, uploadAvatarBytes, uploadAvatarDataUri, S3Env } from './s3';
 import * as OTPAuth from 'otpauth';
 import { Security, UserPayload } from './security';
-import { assertContentModeration, invalidateModerationWordCache } from './content-policy';
+import {
+	assertContentModeration,
+	DEFAULT_ALLOWED_LINK_HOSTS,
+	invalidateAllowedLinkHostsCache,
+	invalidateModerationWordCache,
+	serializeAllowedLinkHosts
+} from './content-policy';
 
 interface DBUser {
     id: number;
@@ -124,7 +130,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -474,7 +480,8 @@ export default {
 					[
 						'friend_links',
 						JSON.stringify([{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }])
-					]
+					],
+					['allowed_link_hosts', JSON.stringify(['aridjaya.eu.org'])]
 				];
 				for (const [key, value] of siteBrandDefaults) {
 					await env.cforum_db
@@ -778,11 +785,13 @@ export default {
 			'site_description',
 			'community_home_url',
 			'footer_rights',
-			'friend_links'
+			'friend_links',
+			'allowed_link_hosts'
 		]);
 		const DEFAULT_FRIEND_LINKS_JSON = JSON.stringify([
 			{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }
 		]);
+		const DEFAULT_ALLOWED_LINK_HOSTS_JSON = serializeAllowedLinkHosts(DEFAULT_ALLOWED_LINK_HOSTS);
 		const SITE_META_DEFAULTS: Record<string, string> = {
 			site_brand: 'liuyuliangbox',
 			project_codename: 'Project Turn',
@@ -791,7 +800,8 @@ export default {
 			site_description: '单人优先的回合制 RPG。开发日志、社区反馈与内测资讯。正式名称待定。',
 			community_home_url: 'https://bbs.aridjaya.eu.org',
 			footer_rights: '保留所有权利。',
-			friend_links: DEFAULT_FRIEND_LINKS_JSON
+			friend_links: DEFAULT_FRIEND_LINKS_JSON,
+			allowed_link_hosts: DEFAULT_ALLOWED_LINK_HOSTS_JSON
 		};
 
 		const normalizeFriendLinksJson = (raw: unknown): string => {
@@ -960,7 +970,8 @@ export default {
 					site_description,
 					community_home_url,
 					footer_rights,
-					friend_links
+					friend_links,
+					allowed_link_hosts
 				} = body;
 				
 				const stmt = env.cforum_db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
@@ -984,8 +995,12 @@ export default {
 				}
 				if (footer_rights !== undefined) batch.push(stmt.bind('footer_rights', String(footer_rights).slice(0, 80)));
 				if (friend_links !== undefined) batch.push(stmt.bind('friend_links', normalizeFriendLinksJson(friend_links)));
+				if (allowed_link_hosts !== undefined) {
+					batch.push(stmt.bind('allowed_link_hosts', serializeAllowedLinkHosts(allowed_link_hosts)));
+				}
 				
 				if (batch.length > 0) await env.cforum_db.batch(batch);
+				if (allowed_link_hosts !== undefined) invalidateAllowedLinkHostsCache();
 				bumpMetaCacheVersion();
 
 				return jsonResponse({ success: true });
@@ -2774,7 +2789,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (content.length > 3000) return jsonResponse({ error: 'Content too long (Max 3000 chars)' }, 400);
 				if (hasControlCharacters(title) || hasControlCharacters(content)) return jsonResponse({ error: 'Title or content contains invalid control characters' }, 400);
 
-				const moderationErr = await assertContentModeration(env.cforum_db, `${title}\n${content}`);
+				const moderationErr = await assertContentModeration(env.cforum_db, `${title}\n${content}`, {
+					skip: userPayload.role === 'admin'
+				});
 				if (moderationErr) return jsonResponse({ error: moderationErr }, 400);
 
 				// Validate Category + announcement restriction
@@ -2888,7 +2905,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (content.length > 3000) return jsonResponse({ error: 'Content too long (Max 3000 chars)' }, 400);
 				if (hasControlCharacters(content)) return jsonResponse({ error: 'Content contains invalid control characters' }, 400);
 
-				const moderationErr = await assertContentModeration(env.cforum_db, content);
+				const moderationErr = await assertContentModeration(env.cforum_db, content, {
+					skip: userPayload.role === 'admin'
+				});
 				if (moderationErr) return jsonResponse({ error: moderationErr }, 400);
 
 				const post = await env.cforum_db.prepare('SELECT id FROM posts WHERE id = ?').bind(postId).first();
@@ -3066,7 +3085,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 
 				if (hasControlCharacters(title) || hasControlCharacters(content)) return jsonResponse({ error: 'Title or content contains invalid control characters' }, 400);
 
-				const moderationErr = await assertContentModeration(env.cforum_db, `${title}\n${content}`);
+				const moderationErr = await assertContentModeration(env.cforum_db, `${title}\n${content}`, {
+					skip: userPayload.role === 'admin'
+				});
 				if (moderationErr) return jsonResponse({ error: moderationErr }, 400);
 
 				// HTML Escape Content (Backend Enforcement)
