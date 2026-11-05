@@ -145,7 +145,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -468,9 +468,42 @@ export default {
 				// column already exists
 			}
 			try {
+				await env.cforum_db
+					.prepare(`ALTER TABLE categories ADD COLUMN enable_relate_others INTEGER NOT NULL DEFAULT 0`)
+					.run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db
+					.prepare(`ALTER TABLE categories ADD COLUMN enable_linked_from INTEGER NOT NULL DEFAULT 0`)
+					.run();
+			} catch {
+				// column already exists
+			}
+			try {
 				await env.cforum_db.prepare(`ALTER TABLE posts ADD COLUMN status TEXT`).run();
 			} catch {
 				// column already exists
+			}
+			try {
+				await env.cforum_db
+					.prepare(
+						`CREATE TABLE IF NOT EXISTS post_relations (
+  from_post_id INTEGER NOT NULL,
+  to_post_id INTEGER NOT NULL,
+  created_by INTEGER NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (from_post_id, to_post_id),
+  CHECK (from_post_id != to_post_id)
+)`
+					)
+					.run();
+				await env.cforum_db
+					.prepare(`CREATE INDEX IF NOT EXISTS idx_post_relations_to ON post_relations(to_post_id)`)
+					.run();
+			} catch (e) {
+				console.error('Failed to ensure post_relations table', e);
 			}
 			try {
 				await env.cforum_db
@@ -1724,6 +1757,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 							IFNULL(sort_order, 0) AS sort_order,
 							IFNULL(status_options, '[]') AS status_options,
 							IFNULL(author_can_set_status, 0) AS author_can_set_status,
+							IFNULL(enable_relate_others, 0) AS enable_relate_others,
+							IFNULL(enable_linked_from, 0) AS enable_linked_from,
 							created_at
 						 FROM categories
 						 ORDER BY IFNULL(sort_order, 0) ASC, id ASC`
@@ -1738,7 +1773,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						show_on_forum: Number(row.show_on_forum) === 1,
 						sort_order: Number(row.sort_order || 0),
 						status_options: parseStatusOptions(row.status_options),
-						author_can_set_status: Number(row.author_can_set_status) === 1
+						author_can_set_status: Number(row.author_can_set_status) === 1,
+						enable_relate_others: Number(row.enable_relate_others) === 1,
+						enable_linked_from: Number(row.enable_linked_from) === 1
 					}))
 				);
 			} catch (e) {
@@ -2057,8 +2094,17 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { name, admin_only, show_on_site, show_on_forum, subtitle, status_options, author_can_set_status } =
-					body;
+				const {
+					name,
+					admin_only,
+					show_on_site,
+					show_on_forum,
+					subtitle,
+					status_options,
+					author_can_set_status,
+					enable_relate_others,
+					enable_linked_from
+				} = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				const subtitleValue = show_on_site ? String(subtitle || '').trim().slice(0, 200) : '';
 				const statusOptionsJson = serializeStatusOptions(status_options);
@@ -2073,8 +2119,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const { success } = await env.cforum_db
 					.prepare(
 						`INSERT INTO categories
-							(name, subtitle, admin_only, show_on_site, show_on_forum, sort_order, status_options, author_can_set_status)
-						 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+							(name, subtitle, admin_only, show_on_site, show_on_forum, sort_order, status_options,
+							 author_can_set_status, enable_relate_others, enable_linked_from)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 					)
 					.bind(
 						name,
@@ -2084,7 +2131,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						show_on_forum === false || show_on_forum === 0 ? 0 : 1,
 						sortOrder,
 						statusOptionsJson,
-						author_can_set_status ? 1 : 0
+						author_can_set_status ? 1 : 0,
+						enable_relate_others ? 1 : 0,
+						enable_linked_from ? 1 : 0
 					)
 					.run();
 				bumpMetaCacheVersion();
@@ -2095,7 +2144,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					subtitle: subtitleValue,
 					sort_order: sortOrder,
 					status_options: parseStatusOptions(statusOptionsJson),
-					author_can_set_status: !!author_can_set_status
+					author_can_set_status: !!author_can_set_status,
+					enable_relate_others: !!enable_relate_others,
+					enable_linked_from: !!enable_linked_from
 				}, request);
 				return jsonResponse({ success });
 			} catch (e) {
@@ -2111,8 +2162,17 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { name, admin_only, show_on_site, show_on_forum, subtitle, status_options, author_can_set_status } =
-					body;
+				const {
+					name,
+					admin_only,
+					show_on_site,
+					show_on_forum,
+					subtitle,
+					status_options,
+					author_can_set_status,
+					enable_relate_others,
+					enable_linked_from
+				} = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				const subtitleValue = show_on_site ? String(subtitle || '').trim().slice(0, 200) : '';
 				const statusOptionsJson = serializeStatusOptions(status_options);
@@ -2120,7 +2180,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				await env.cforum_db
 					.prepare(
 						`UPDATE categories SET name = ?, subtitle = ?, admin_only = ?, show_on_site = ?, show_on_forum = ?,
-							status_options = ?, author_can_set_status = ? WHERE id = ?`
+							status_options = ?, author_can_set_status = ?, enable_relate_others = ?, enable_linked_from = ?
+						 WHERE id = ?`
 					)
 					.bind(
 						name,
@@ -2130,6 +2191,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						show_on_forum === false || show_on_forum === 0 ? 0 : 1,
 						statusOptionsJson,
 						author_can_set_status ? 1 : 0,
+						enable_relate_others ? 1 : 0,
+						enable_linked_from ? 1 : 0,
 						id
 					)
 					.run();
@@ -2141,7 +2204,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					show_on_forum: !(show_on_forum === false || show_on_forum === 0),
 					subtitle: subtitleValue,
 					status_options: parseStatusOptions(statusOptionsJson),
-					author_can_set_status: !!author_can_set_status
+					author_can_set_status: !!author_can_set_status,
+					enable_relate_others: !!enable_relate_others,
+					enable_linked_from: !!enable_linked_from
 				}, request);
 				return jsonResponse({ success: true });
 			} catch (e) {
@@ -2947,6 +3012,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						IFNULL(categories.show_on_forum, 1) AS category_show_on_forum,
 						IFNULL(categories.status_options, '[]') AS category_status_options,
 						IFNULL(categories.author_can_set_status, 0) AS category_author_can_set_status,
+						IFNULL(categories.enable_relate_others, 0) AS category_enable_relate_others,
+						IFNULL(categories.enable_linked_from, 0) AS category_enable_linked_from,
                         (SELECT COUNT(*) FROM likes WHERE likes.post_id = posts.id) as like_count,
                         (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) as comment_count
                      FROM posts 
@@ -2981,12 +3048,142 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					(post as any).liked = !!like;
 				}
 
+				const enableRelateOthers = Number((post as any).category_enable_relate_others) === 1;
+				const enableLinkedFrom = Number((post as any).category_enable_linked_from) === 1;
+				const relationCardSql = `SELECT
+						posts.id, posts.title, posts.status, posts.category_id, posts.created_at,
+						categories.name AS category_name,
+						users.username AS author_name
+					 FROM posts
+					 JOIN users ON posts.author_id = users.id
+					 LEFT JOIN categories ON posts.category_id = categories.id`;
+				let related_posts: any[] = [];
+				let linked_from_posts: any[] = [];
+				if (enableRelateOthers) {
+					const { results } = await env.cforum_db
+						.prepare(
+							`${relationCardSql}
+							 INNER JOIN post_relations pr ON pr.to_post_id = posts.id
+							 WHERE pr.from_post_id = ?
+							   AND IFNULL(posts.is_visible, 1) = 1
+							 ORDER BY pr.created_at DESC`
+						)
+						.bind(postId)
+						.all();
+					related_posts = (results || []).map((row: any) => ({
+						...row,
+						status: row.status || null
+					}));
+				}
+				if (enableLinkedFrom) {
+					const { results } = await env.cforum_db
+						.prepare(
+							`${relationCardSql}
+							 INNER JOIN post_relations pr ON pr.from_post_id = posts.id
+							 WHERE pr.to_post_id = ?
+							   AND IFNULL(posts.is_visible, 1) = 1
+							 ORDER BY pr.created_at DESC`
+						)
+						.bind(postId)
+						.all();
+					linked_from_posts = (results || []).map((row: any) => ({
+						...row,
+						status: row.status || null
+					}));
+				}
+
 				return jsonResponse({
 					...post,
 					status: (post as any).status || null,
 					category_status_options: parseStatusOptions((post as any).category_status_options),
-					category_author_can_set_status: Number((post as any).category_author_can_set_status) === 1
+					category_author_can_set_status: Number((post as any).category_author_can_set_status) === 1,
+					category_enable_relate_others: enableRelateOthers,
+					category_enable_linked_from: enableLinkedFrom,
+					related_posts,
+					linked_from_posts
 				});
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// PUT /api/posts/:id/relations — admin only; replace outgoing related posts
+		if (url.pathname.match(/^\/api\/posts\/\d+\/relations$/) && method === 'PUT') {
+			const postId = Number(url.pathname.split('/')[3]);
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+
+				const source = await env.cforum_db
+					.prepare(
+						`SELECT posts.id, posts.category_id,
+							IFNULL(categories.enable_relate_others, 0) AS enable_relate_others
+						 FROM posts
+						 LEFT JOIN categories ON posts.category_id = categories.id
+						 WHERE posts.id = ?`
+					)
+					.bind(postId)
+					.first<{ id: number; category_id: number | null; enable_relate_others: number }>();
+				if (!source) return jsonResponse({ error: 'Post not found' }, 404);
+				if (Number(source.enable_relate_others) !== 1) {
+					return jsonResponse({ error: '该分类未启用关联其他' }, 400);
+				}
+
+				const body = (await request.json()) as any;
+				const rawIds = Array.isArray(body?.related_ids) ? body.related_ids : [];
+				const relatedIds = [
+					...new Set(
+						rawIds
+							.map((x: any) => Number(x))
+							.filter((n: number) => Number.isFinite(n) && n > 0 && n !== postId)
+					)
+				].slice(0, 10) as number[];
+
+				if (relatedIds.length) {
+					const placeholders = relatedIds.map(() => '?').join(',');
+					const { results: targets } = await env.cforum_db
+						.prepare(
+							`SELECT posts.id,
+								IFNULL(categories.enable_linked_from, 0) AS enable_linked_from,
+								IFNULL(posts.is_visible, 1) AS is_visible
+							 FROM posts
+							 LEFT JOIN categories ON posts.category_id = categories.id
+							 WHERE posts.id IN (${placeholders})`
+						)
+						.bind(...relatedIds)
+						.all<{ id: number; enable_linked_from: number; is_visible: number }>();
+					const byId = new Map((targets || []).map((t) => [Number(t.id), t]));
+					for (const id of relatedIds) {
+						const t = byId.get(id);
+						if (!t) return jsonResponse({ error: `目标帖不存在: ${id}` }, 400);
+						if (Number(t.is_visible) !== 1) return jsonResponse({ error: `目标帖不可见: ${id}` }, 400);
+						if (Number(t.enable_linked_from) !== 1) {
+							return jsonResponse({ error: `目标帖分类未启用被关联: ${id}` }, 400);
+						}
+					}
+				}
+
+				await env.cforum_db
+					.prepare(`DELETE FROM post_relations WHERE from_post_id = ?`)
+					.bind(postId)
+					.run();
+				if (relatedIds.length) {
+					const insert = env.cforum_db.prepare(
+						`INSERT INTO post_relations (from_post_id, to_post_id, created_by) VALUES (?, ?, ?)`
+					);
+					await env.cforum_db.batch(
+						relatedIds.map((toId) => insert.bind(postId, toId, userPayload.id))
+					);
+				}
+				await security.logAudit(
+					userPayload.id,
+					'SET_POST_RELATIONS',
+					'post',
+					String(postId),
+					{ related_ids: relatedIds },
+					request
+				);
+				return jsonResponse({ success: true, related_ids: relatedIds });
 			} catch (e) {
 				return handleError(e);
 			}

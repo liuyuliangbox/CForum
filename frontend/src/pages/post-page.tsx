@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowLeft, Eye, EyeOff, Heart, MoreVertical, Pin, Pencil, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Heart, Link2, MoreVertical, Pin, Pencil, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
 
 import { AdminCooldownMenuItems, AdminCooldownTrigger } from '@/components/admin-cooldown-menu';
 import { MarkdownToolbar } from '@/components/markdown-toolbar';
@@ -18,7 +18,8 @@ import {
 	getSecurityHeaders,
 	type Category,
 	type Comment,
-	type Post
+	type Post,
+	type RelatedPostCard
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
@@ -128,6 +129,13 @@ export function PostPage() {
 	const [adminMenuOpen, setAdminMenuOpen] = React.useState(false);
 	const adminMenuRef = React.useRef<HTMLDivElement | null>(null);
 	const [allCategories, setAllCategories] = React.useState<Category[]>([]);
+	const [relationsOpen, setRelationsOpen] = React.useState(false);
+	const [relationSelectedIds, setRelationSelectedIds] = React.useState<number[]>([]);
+	const [relationSearch, setRelationSearch] = React.useState('');
+	const [relationSearchResults, setRelationSearchResults] = React.useState<Post[]>([]);
+	const [relationSearchLoading, setRelationSearchLoading] = React.useState(false);
+	const [relationSaving, setRelationSaving] = React.useState(false);
+	const [relationError, setRelationError] = React.useState('');
 	const [publishNowMs, setPublishNowMs] = React.useState(() => Date.now());
 	const needsPublishTick =
 		!!user &&
@@ -455,6 +463,101 @@ export function PostPage() {
 		}
 	}
 
+	function openRelationsManager() {
+		if (!post) return;
+		setRelationSelectedIds((post.related_posts || []).map((p) => p.id));
+		setRelationSearch('');
+		setRelationSearchResults([]);
+		setRelationError('');
+		setRelationsOpen(true);
+		setAdminMenuOpen(false);
+	}
+
+	async function searchRelationTargets() {
+		if (!post) return;
+		const q = relationSearch.trim();
+		if (!q) {
+			setRelationSearchResults([]);
+			return;
+		}
+		setRelationSearchLoading(true);
+		setRelationError('');
+		try {
+			const linkableCategoryIds = new Set(
+				allCategories.filter((c) => !!c.enable_linked_from).map((c) => c.id)
+			);
+			const data = await apiFetch<{ posts: Post[] }>(
+				`/posts?limit=20&offset=0&search=${encodeURIComponent(q)}`,
+				{ headers: getSecurityHeaders('GET', null) }
+			);
+			setRelationSearchResults(
+				(data.posts || []).filter(
+					(p) =>
+						p.id !== post.id &&
+						(p.category_id == null || linkableCategoryIds.has(Number(p.category_id)))
+				)
+			);
+		} catch (e: any) {
+			setRelationError(String(e?.message || e));
+		} finally {
+			setRelationSearchLoading(false);
+		}
+	}
+
+	function toggleRelationId(id: number) {
+		setRelationSelectedIds((prev) => {
+			if (prev.includes(id)) return prev.filter((x) => x !== id);
+			if (prev.length >= 10) {
+				setRelationError('最多关联 10 个帖子');
+				return prev;
+			}
+			setRelationError('');
+			return [...prev, id];
+		});
+	}
+
+	async function saveRelations() {
+		if (!post) return;
+		setRelationSaving(true);
+		setRelationError('');
+		try {
+			await apiFetch(`/posts/${post.id}/relations`, {
+				method: 'PUT',
+				headers: getSecurityHeaders('PUT'),
+				body: JSON.stringify({ related_ids: relationSelectedIds })
+			});
+			setRelationsOpen(false);
+			await refresh();
+		} catch (e: any) {
+			setRelationError(String(e?.message || e));
+		} finally {
+			setRelationSaving(false);
+		}
+	}
+
+	function renderRelationCards(items: RelatedPostCard[]) {
+		return (
+			<div className="grid gap-2 sm:grid-cols-2">
+				{items.map((item) => (
+					<a
+						key={item.id}
+						href={`/post?id=${item.id}`}
+						className="block rounded-md border bg-background/70 p-3 transition-colors hover:bg-muted/40"
+					>
+						<div className="line-clamp-2 text-sm font-medium">{item.title}</div>
+						<div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+							{item.category_name ? <span>{item.category_name}</span> : null}
+							{item.status ? (
+								<span className="rounded border px-1.5 py-0.5 text-[10px]">{item.status}</span>
+							) : null}
+							{item.author_name ? <span>{item.author_name}</span> : null}
+						</div>
+					</a>
+				))}
+			</div>
+		);
+	}
+
 	async function adminMovePostCategory(categoryId: number) {
 		if (!post) return;
 		if (!user || user.role !== 'admin') return;
@@ -679,6 +782,16 @@ export function PostPage() {
 															{post.is_pinned ? '取消置顶' : '置顶'}
 														</button>
 													) : null}
+													{user.role === 'admin' && !!post.category_enable_relate_others ? (
+														<button
+															type="button"
+															className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+															onClick={() => openRelationsManager()}
+														>
+															<Link2 className="h-4 w-4" />
+															管理关联
+														</button>
+													) : null}
 													{user.role === 'admin' || Number(post.site_featured ?? 0) !== 1 ? (
 														<button
 															type="button"
@@ -815,6 +928,147 @@ export function PostPage() {
 								)}
 							</CardContent>
 						</Card>
+
+						{!!post.category_enable_relate_others &&
+						((post.related_posts && post.related_posts.length > 0) ||
+							(user?.role === 'admin' && relationsOpen)) ? (
+							<Card>
+								<CardHeader className="flex flex-row items-center justify-between space-y-0">
+									<CardTitle className="text-base">相关帖子</CardTitle>
+									{user?.role === 'admin' ? (
+										<Button variant="outline" size="sm" onClick={() => openRelationsManager()}>
+											管理
+										</Button>
+									) : null}
+								</CardHeader>
+								<CardContent>
+									{post.related_posts && post.related_posts.length > 0 ? (
+										renderRelationCards(post.related_posts)
+									) : (
+										<div className="text-sm text-muted-foreground">暂无关联帖子</div>
+									)}
+								</CardContent>
+							</Card>
+						) : null}
+
+						{!!post.category_enable_linked_from &&
+						post.linked_from_posts &&
+						post.linked_from_posts.length > 0 ? (
+							<Card>
+								<CardHeader>
+									<CardTitle className="text-base">被关联自</CardTitle>
+								</CardHeader>
+								<CardContent>{renderRelationCards(post.linked_from_posts)}</CardContent>
+							</Card>
+						) : null}
+
+						{relationsOpen && user?.role === 'admin' && !!post.category_enable_relate_others ? (
+							<Card>
+								<CardHeader className="flex flex-row items-center justify-between space-y-0">
+									<CardTitle className="text-base">管理关联（最多 10 个）</CardTitle>
+									<Button variant="ghost" size="sm" onClick={() => setRelationsOpen(false)}>
+										<X className="h-4 w-4" />
+										<span className="sr-only">关闭</span>
+									</Button>
+								</CardHeader>
+								<CardContent className="space-y-3">
+									{relationError ? (
+										<div className="rounded-md border border-destructive/50 bg-destructive/5 p-2 text-sm text-destructive">
+											{relationError}
+										</div>
+									) : null}
+									<div className="flex flex-wrap gap-2">
+										<Input
+											value={relationSearch}
+											placeholder="搜索可被关联的帖子标题"
+											className="max-w-sm"
+											onChange={(e) => setRelationSearch(e.target.value)}
+											onKeyDown={(e) => {
+												if (e.key === 'Enter') {
+													e.preventDefault();
+													void searchRelationTargets();
+												}
+											}}
+										/>
+										<Button
+											variant="outline"
+											disabled={relationSearchLoading}
+											onClick={() => void searchRelationTargets()}
+										>
+											{relationSearchLoading ? '搜索中…' : '搜索'}
+										</Button>
+									</div>
+									{relationSelectedIds.length ? (
+										<div className="space-y-1">
+											<div className="text-xs font-medium text-muted-foreground">
+												已选 {relationSelectedIds.length}/10
+											</div>
+											<div className="flex flex-wrap gap-2">
+												{relationSelectedIds.map((id) => {
+													const known =
+														(post.related_posts || []).find((p) => p.id === id) ||
+														relationSearchResults.find((p) => p.id === id);
+													return (
+														<button
+															key={id}
+															type="button"
+															className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+															onClick={() => toggleRelationId(id)}
+															title="点击移除"
+														>
+															{known?.title || `#${id}`} ×
+														</button>
+													);
+												})}
+											</div>
+										</div>
+									) : null}
+									{relationSearchResults.length ? (
+										<div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
+											{relationSearchResults.map((p) => {
+												const selected = relationSelectedIds.includes(p.id);
+												return (
+													<button
+														key={p.id}
+														type="button"
+														className={cn(
+															'flex w-full items-start justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted',
+															selected ? 'bg-muted font-medium' : ''
+														)}
+														onClick={() => toggleRelationId(p.id)}
+													>
+														<span className="line-clamp-2">{p.title}</span>
+														<span className="shrink-0 text-xs text-muted-foreground">
+															{selected ? '已选' : p.category_name || ''}
+														</span>
+													</button>
+												);
+											})}
+										</div>
+									) : null}
+									<div className="flex gap-2">
+										<Button onClick={() => void saveRelations()} disabled={relationSaving}>
+											{relationSaving ? '保存中…' : '保存关联'}
+										</Button>
+										<Button variant="outline" onClick={() => setRelationsOpen(false)}>
+											取消
+										</Button>
+									</div>
+								</CardContent>
+							</Card>
+						) : null}
+
+						{user?.role === 'admin' &&
+						!!post.category_enable_relate_others &&
+						!(post.related_posts && post.related_posts.length > 0) &&
+						!relationsOpen ? (
+							<div className="flex justify-end">
+								<Button variant="outline" size="sm" onClick={() => openRelationsManager()}>
+									<Link2 className="h-4 w-4" />
+									添加关联帖子
+								</Button>
+							</div>
+						) : null}
 
 						<Card>
 							<CardHeader>

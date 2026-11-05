@@ -23,7 +23,21 @@ export type Category = {
 	status_options?: string[];
 	/** 作者是否可修改自己帖子的状态 */
 	author_can_set_status?: number | boolean;
+	/** 本分类帖可挂出边「相关帖」 */
+	enable_relate_others?: number | boolean;
+	/** 本分类帖可展示被关联，且可作为关联目标 */
+	enable_linked_from?: number | boolean;
 	created_at: string;
+};
+
+export type RelatedPostCard = {
+	id: number;
+	title: string;
+	status?: string | null;
+	category_id?: number | null;
+	category_name?: string | null;
+	author_name?: string;
+	created_at?: string;
 };
 
 export type Post = {
@@ -44,6 +58,10 @@ export type Post = {
 	status?: string | null;
 	category_status_options?: string[];
 	category_author_can_set_status?: number | boolean;
+	category_enable_relate_others?: number | boolean;
+	category_enable_linked_from?: number | boolean;
+	related_posts?: RelatedPostCard[];
+	linked_from_posts?: RelatedPostCard[];
 	view_count?: number;
 	created_at: string;
 	author_name?: string;
