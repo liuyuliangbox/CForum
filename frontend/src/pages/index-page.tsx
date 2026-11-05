@@ -454,7 +454,7 @@ export function IndexPage() {
 			if (remain <= 0) {
 				alert(
 					post.author_publish_until
-						? '超过 30 分钟未设为可见，已失去设为可见权限，请联系管理员'
+						? '超过 15 分钟未设为可见，已失去设为可见权限，请联系管理员'
 						: '隐藏后不可再设为可见，请联系管理员'
 				);
 				return;
@@ -468,7 +468,7 @@ export function IndexPage() {
 			);
 			if (!ok) return;
 		} else if (!isAdmin) {
-			const ok = confirm('设为可见后将不可再编辑，请确认内容已审核无误。');
+			const ok = confirm('设为可见后将不可再编辑，请确认内容已核对无误。');
 			if (!ok) return;
 		}
 		setAdminActionPostId(post.id);
@@ -893,22 +893,6 @@ export function IndexPage() {
 												))}
 										</select>
 									</div>
-									<label className="flex flex-col gap-1 text-sm">
-										<span className="flex items-center gap-2">
-											<input
-												type="checkbox"
-												className="h-4 w-4"
-												checked={newVisible}
-												onChange={(e) => setNewVisible(e.target.checked)}
-											/>
-											设置可见（勾选后作者不可再编辑，请仔细审核）
-										</span>
-										{!newVisible ? (
-											<span className="pl-6 text-xs text-muted-foreground">
-												未勾选时将进入审核倒计时：30 分钟内可设为可见，逾期将失去该权限
-											</span>
-										) : null}
-									</label>
 								</div>
 								<div className="space-y-2">
 								<div className="flex flex-wrap items-center justify-between gap-2">
@@ -993,6 +977,23 @@ export function IndexPage() {
 			{uploadLoading ? <div className="text-sm text-muted-foreground">上传中…</div> : null}
 		</div>
 		<TurnstileWidget enabled={turnstileActive} siteKey={siteKey} onToken={setTurnstileToken} resetKey={turnstileResetKey} />
+
+								<label className="flex flex-col gap-1 text-sm">
+									<span className="flex items-center gap-2">
+										<input
+											type="checkbox"
+											className="h-4 w-4"
+											checked={newVisible}
+											onChange={(e) => setNewVisible(e.target.checked)}
+										/>
+										设置可见（勾选发布后将不可再编辑，请仔细核对）
+									</span>
+									{!newVisible ? (
+										<span className="pl-6 text-xs text-muted-foreground">
+											未勾选时将进入核对倒计时：15 分钟内仍可编辑，请尽快核对；逾期未设为可见，将失去该权限
+										</span>
+									) : null}
+								</label>
 
 								<Button type="submit" disabled={createLoading}>
 									{createLoading ? '发布中...' : '发布'}
@@ -1302,7 +1303,7 @@ export function IndexPage() {
 												{canAuthorPublish ? (
 													<div className="pointer-events-auto rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-900 dark:text-amber-100">
 														<span className="font-medium tabular-nums">
-															审核倒计时 {formatCountdown(publishRemainMs)}
+															核对倒计时 {formatCountdown(publishRemainMs)}
 														</span>
 														<span className="mt-0.5 block text-[11px] opacity-90">
 															到期前请设为可见，否则将失去设为可见权限

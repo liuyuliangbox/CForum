@@ -313,7 +313,7 @@ export function PostPage() {
 			if (remain <= 0) {
 				alert(
 					post.author_publish_until
-						? '超过 30 分钟未设为可见，已失去设为可见权限，请联系管理员'
+						? '超过 15 分钟未设为可见，已失去设为可见权限，请联系管理员'
 						: '隐藏后不可再设为可见，请联系管理员'
 				);
 				return;
@@ -327,7 +327,7 @@ export function PostPage() {
 			);
 			if (!ok) return;
 		} else if (!isAdmin) {
-			const ok = confirm('设为可见后将不可再编辑，请确认内容已审核无误。');
+			const ok = confirm('设为可见后将不可再编辑，请确认内容已核对无误。');
 			if (!ok) return;
 		}
 		try {
@@ -485,7 +485,7 @@ export function PostPage() {
 										user.id === post.author_id &&
 										getAuthorPublishRemainingMs(post, publishNowMs) > 0 ? (
 											<span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-900 dark:text-amber-100">
-												审核倒计时 {formatCountdown(getAuthorPublishRemainingMs(post, publishNowMs))}
+												核对倒计时 {formatCountdown(getAuthorPublishRemainingMs(post, publishNowMs))}
 											</span>
 										) : null}
 										{post.category_name ? (

@@ -2594,7 +2594,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						);
 						if (Number.isNaN(untilMs) || Date.now() > untilMs) {
 							return jsonResponse(
-								{ error: '超过 30 分钟未设为可见，已失去设为可见权限，请联系管理员' },
+								{ error: '超过 15 分钟未设为可见，已失去设为可见权限，请联系管理员' },
 								403
 							);
 						}
@@ -3013,7 +3013,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 
 				const authorPublishUntil = isVisible
 					? null
-					: new Date(Date.now() + 30 * 60 * 1000)
+					: new Date(Date.now() + 15 * 60 * 1000)
 							.toISOString()
 							.replace('T', ' ')
 							.slice(0, 19);
