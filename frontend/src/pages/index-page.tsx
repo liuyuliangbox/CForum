@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, EyeOff, Heart, MessageCircle, MoreVertical, Pin, RefreshCw, Search, Shield, Star, Trash2, User, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Heart, MessageCircle, MoreVertical, Pin, RefreshCw, Search, Shield, Star, Trash2, User, X } from 'lucide-react';
 
+import { MarkdownToolbar } from '@/components/markdown-toolbar';
 import { TurnstileWidget } from '@/components/turnstile';
 import { PageShell } from '@/components/page-shell';
 import { Button } from '@/components/ui/button';
@@ -19,7 +20,14 @@ import {
 	type Post
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
+import { assertAllowedContentUrls } from '@/lib/content-policy';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
+import {
+	handleMarkdownEditorKeyDown,
+	runMarkdownAction,
+	type EditResult,
+	type MarkdownEditorAction
+} from '@/lib/markdown-editor';
 import { resolveSiteTagline, resolveSiteTitle } from '@/lib/site';
 import { cn } from '@/lib/utils';
 import { validateText } from '@/lib/validators';
@@ -56,32 +64,14 @@ export function IndexPage() {
 	const [createError, setCreateError] = React.useState('');
 	const [uploadLoading, setUploadLoading] = React.useState(false);
 	const [uploadError, setUploadError] = React.useState('');
+	const [turnstileToken, setTurnstileToken] = React.useState('');
+	const [turnstileResetKey, setTurnstileResetKey] = React.useState(0);
+	const previewRef = React.useRef<HTMLDivElement | null>(null);
+	const newContentRef = React.useRef<HTMLTextAreaElement | null>(null);
+	const imageInputRef = React.useRef<HTMLInputElement | null>(null);
+	const isAdminEditor = user?.role === 'admin';
 
-	// insert text at current cursor position in the textarea (or append)
-	function insertIntoContent(insertText: string) {
-		if (newContentRef.current) {
-			const el = newContentRef.current;
-			const start = el.selectionStart;
-			const end = el.selectionEnd;
-			const before = newContent.slice(0, start);
-			const after = newContent.slice(end);
-			const updated = before + insertText + after;
-			setNewContent(updated);
-			// reposition cursor immediately after inserted text
-			setTimeout(() => {
-				el.selectionStart = el.selectionEnd = start + insertText.length;
-				el.focus();
-			}, 0);
-		} else {
-			setNewContent(newContent + insertText);
-		}
-	}
-
-	function applyEdit(transform: (text: string, start: number, end: number) => { text: string; selectionStart: number; selectionEnd: number }) {
-		const el = newContentRef.current;
-		const start = el ? el.selectionStart : newContent.length;
-		const end = el ? el.selectionEnd : newContent.length;
-		const result = transform(newContent, start, end);
+	function applyEditResult(result: EditResult) {
 		setNewContent(result.text);
 		setTimeout(() => {
 			const target = newContentRef.current;
@@ -92,204 +82,54 @@ export function IndexPage() {
 		}, 0);
 	}
 
-	function wrapSelection(prefix: string, suffix: string, placeholder: string) {
-		applyEdit((text, start, end) => {
-			const selected = text.slice(start, end) || placeholder;
-			const next = text.slice(0, start) + prefix + selected + suffix + text.slice(end);
-			const selectionStart = start + prefix.length;
-			const selectionEnd = selectionStart + selected.length;
-			return { text: next, selectionStart, selectionEnd };
+	function insertIntoContent(insertText: string) {
+		const el = newContentRef.current;
+		const start = el ? el.selectionStart : newContent.length;
+		const end = el ? el.selectionEnd : newContent.length;
+		applyEditResult({
+			text: newContent.slice(0, start) + insertText + newContent.slice(end),
+			selectionStart: start + insertText.length,
+			selectionEnd: start + insertText.length
 		});
 	}
 
-	function wrapBlock(fence: string) {
-		applyEdit((text, start, end) => {
-			const selected = text.slice(start, end);
-			const block = `${fence}\n${selected}\n${fence}`;
-			const next = text.slice(0, start) + block + text.slice(end);
-			const selectionStart = start + fence.length + 1;
-			const selectionEnd = selectionStart + selected.length;
-			return { text: next, selectionStart, selectionEnd };
-		});
+	function onEditorAction(action: MarkdownEditorAction) {
+		const el = newContentRef.current;
+		const start = el ? el.selectionStart : newContent.length;
+		const end = el ? el.selectionEnd : newContent.length;
+		applyEditResult(runMarkdownAction(newContent, start, end, action));
 	}
 
-	function transformLines(transform: (line: string, index: number, lines: string[]) => string) {
-		applyEdit((text, start, end) => {
-			const lineStart = text.lastIndexOf('\n', start - 1) + 1;
-			const lineEnd = text.indexOf('\n', end);
-			const endIndex = lineEnd === -1 ? text.length : lineEnd;
-			const segment = text.slice(lineStart, endIndex);
-			const lines = segment.split('\n');
-			const nextSegment = lines.map(transform).join('\n');
-			const next = text.slice(0, lineStart) + nextSegment + text.slice(endIndex);
-			return { text: next, selectionStart: lineStart, selectionEnd: lineStart + nextSegment.length };
-		});
-	}
+	async function handleImageFile(file: File) {
+		setUploadError('');
+		if (file.size > 2 * 1024 * 1024) {
+			setUploadError('文件过大 (最大 2MB)');
+			return;
+		}
+		setUploadLoading(true);
+		try {
+			const formData = new FormData();
+			formData.append('file', file);
+			formData.append('type', 'post');
+			const res = await fetch('/api/upload', {
+				method: 'POST',
+				headers: getSecurityHeaders('POST', null),
+				body: formData
+			});
+			const data = await res.json();
+			if (!res.ok) throw new Error(data?.error || '上传失败');
+			insertIntoContent(`
 
-	function setHeading(level: number) {
-		transformLines((line) => {
-			const cleaned = line.replace(/^\s{0,3}#{1,6}\s+/, '');
-			if (level === 0) return cleaned;
-			return `${'#'.repeat(level)} ${cleaned}`;
-		});
-	}
+![](${data.url})
 
-	function toggleLinePrefix(prefix: string, matcher: RegExp) {
-		transformLines((line) => {
-			if (matcher.test(line)) return line.replace(matcher, '');
-			return `${prefix}${line}`;
-		});
-	}
-
-	function toggleBlockquote() {
-		transformLines((line) => (line.startsWith('> ') ? line.slice(2) : `> ${line}`));
-	}
-
-	function toggleList(ordered: boolean) {
-		transformLines((line, index, lines) => {
-			if (ordered) {
-				if (/^\d+\.\s+/.test(line)) return line.replace(/^\d+\.\s+/, '');
-				return `${index + 1}. ${line}`;
-			}
-			if (/^[-*+]\s+/.test(line)) return line.replace(/^[-*+]\s+/, '');
-			return `- ${line}`;
-		});
-	}
-
-	function indentLines() {
-		transformLines((line) => `  ${line}`);
-	}
-
-	function outdentLines() {
-		transformLines((line) => line.replace(/^(\t| {1,2})/, ''));
-	}
-
-	function insertLink(isImage: boolean) {
-		applyEdit((text, start, end) => {
-			const selected = text.slice(start, end) || (isImage ? 'alt' : 'text');
-			const link = isImage ? `![${selected}](url)` : `[${selected}](url)`;
-			const next = text.slice(0, start) + link + text.slice(end);
-			const urlStart = start + (isImage ? 2 : 1) + selected.length + 2;
-			const urlEnd = urlStart + 3;
-			return { text: next, selectionStart: urlStart, selectionEnd: urlEnd };
-		});
-	}
-
-	function insertTable() {
-		applyEdit((text, start, end) => {
-			const table = `| Header | Header |\n| --- | --- |\n| Cell | Cell |`;
-			const next = text.slice(0, start) + table + text.slice(end);
-			const selectionStart = start + 2;
-			const selectionEnd = selectionStart + 6;
-			return { text: next, selectionStart, selectionEnd };
-		});
-	}
-
-	function handleEditorKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-		const isMod = e.ctrlKey || e.metaKey;
-		if (!isMod) return;
-		const key = e.key.toLowerCase();
-		const shift = e.shiftKey;
-		if (!shift && key === 'b') {
-			e.preventDefault();
-			wrapSelection('**', '**', 'text');
-			return;
-		}
-		if (!shift && key === 'i') {
-			e.preventDefault();
-			wrapSelection('*', '*', 'text');
-			return;
-		}
-		if (!shift && key === 'u') {
-			e.preventDefault();
-			wrapSelection('<u>', '</u>', 'text');
-			return;
-		}
-		if (!shift && key === 'k') {
-			e.preventDefault();
-			insertLink(false);
-			return;
-		}
-		if (!shift && key === 't') {
-			e.preventDefault();
-			insertTable();
-			return;
-		}
-		if (shift && key === 'i') {
-			e.preventDefault();
-			insertLink(true);
-			return;
-		}
-		if (!shift && key === '0') {
-			e.preventDefault();
-			setHeading(0);
-			return;
-		}
-		if (!shift && key === '1') {
-			e.preventDefault();
-			setHeading(1);
-			return;
-		}
-		if (!shift && key === '2') {
-			e.preventDefault();
-			setHeading(2);
-			return;
-		}
-		if (!shift && key === '3') {
-			e.preventDefault();
-			setHeading(3);
-			return;
-		}
-		if (shift && key === 'k') {
-			e.preventDefault();
-			wrapBlock('```');
-			return;
-		}
-		if (shift && key === 'm') {
-			e.preventDefault();
-			wrapBlock('$$');
-			return;
-		}
-		if (shift && key === 'q') {
-			e.preventDefault();
-			toggleBlockquote();
-			return;
-		}
-		if (shift && key === '[') {
-			e.preventDefault();
-			toggleList(true);
-			return;
-		}
-		if (shift && key === ']') {
-			e.preventDefault();
-			toggleList(false);
-			return;
-		}
-		if (!shift && key === '[') {
-			e.preventDefault();
-			outdentLines();
-			return;
-		}
-		if (!shift && key === ']') {
-			e.preventDefault();
-			indentLines();
-			return;
-		}
-		if (shift && (e.code === 'Backquote' || key === '`')) {
-			e.preventDefault();
-			wrapSelection('`', '`', 'code');
-			return;
-		}
-		if (e.altKey && shift && e.code === 'Digit5') {
-			e.preventDefault();
-			wrapSelection('~~', '~~', 'text');
-			return;
+`);
+			setPreviewOpen(true);
+		} catch (err: any) {
+			setUploadError(String(err?.message || err));
+		} finally {
+			setUploadLoading(false);
 		}
 	}
-	const [turnstileToken, setTurnstileToken] = React.useState('');
-	const [turnstileResetKey, setTurnstileResetKey] = React.useState(0);
-	const previewRef = React.useRef<HTMLDivElement | null>(null);
-	const newContentRef = React.useRef<HTMLTextAreaElement | null>(null);
 	const [adminMenuPostId, setAdminMenuPostId] = React.useState<number | null>(null);
 	const [adminActionPostId, setAdminActionPostId] = React.useState<number | null>(null);
 	const [sortOption, setSortOption] = React.useState('time_desc');
@@ -568,6 +408,8 @@ export function IndexPage() {
 		if (!newCategoryId) return setCreateError('请选择分类');
 		if (newTitle.length > 30) return setCreateError('标题过长 (最多 30 字符)');
 		if (newContent.length > 3000) return setCreateError('内容过长 (最多 3000 字符)');
+		const urlErr = assertAllowedContentUrls(`${newTitle}\n${newContent}`);
+		if (urlErr) return setCreateError(urlErr);
 		if (turnstileActive && !turnstileToken) return setCreateError('请完成验证码验证');
 
 		setCreateLoading(true);
@@ -895,87 +737,59 @@ export function IndexPage() {
 									</div>
 								</div>
 								<div className="space-y-2">
-								<div className="flex flex-wrap items-center justify-between gap-2">
 									<Label htmlFor="new-content">内容 (支持 Markdown)</Label>
-									<div className="flex items-center gap-2">
-										<span className="hidden text-xs text-muted-foreground lg:inline">快捷键：Ctrl+1/2/3、Ctrl+B/I/U、Ctrl+K、Ctrl+Shift+K</span>
-										<Button type="button" variant="outline" size="sm" onClick={() => setPreviewOpen((v) => !v)}>
-											{previewOpen ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-											<span className="sr-only">{previewOpen ? '关闭预览' : '打开预览'}</span>
-										</Button>
-									</div>
-								</div>
-								<div className={previewOpen ? 'grid gap-3 lg:grid-cols-2' : 'space-y-2'}>
-									<div className="space-y-2">
-										<Textarea
-											id="new-content"
-											ref={newContentRef}
-											value={newContent}
-											onChange={(e) => setNewContent(e.target.value)}
-											onKeyDown={handleEditorKeyDown}
-											rows={10}
-											className="min-h-[220px]"
-											required
-										/>
-										<div className="text-xs text-muted-foreground">Ctrl+T 表格，Ctrl+Shift+M 公式，Ctrl+Shift+Q 引用，Alt+Shift+5 删除线</div>
-									</div>
-									{previewOpen ? (
-										<div className="rounded-md border bg-muted/20 p-3">
-											<div className="mb-2 text-xs font-medium text-muted-foreground">预览</div>
-											<div
-												ref={previewRef}
-												className="prose max-w-none break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
-												dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(newContent || '') }}
+									<MarkdownToolbar
+										isAdmin={!!isAdminEditor}
+										previewOpen={previewOpen}
+										onTogglePreview={() => setPreviewOpen((v) => !v)}
+										onAction={onEditorAction}
+										onPickImage={() => imageInputRef.current?.click()}
+									/>
+									<input
+										ref={imageInputRef}
+										type="file"
+										accept="image/*"
+										className="hidden"
+										onChange={async (e) => {
+											const file = e.target.files && e.target.files[0];
+											e.target.value = '';
+											if (!file) return;
+											await handleImageFile(file);
+										}}
+									/>
+									{uploadError ? <div className="text-sm text-destructive">{uploadError}</div> : null}
+									{uploadLoading ? <div className="text-sm text-muted-foreground">上传中…</div> : null}
+									<div className={previewOpen ? 'grid gap-3 lg:grid-cols-2' : 'space-y-2'}>
+										<div className="space-y-2">
+											<Textarea
+												id="new-content"
+												ref={newContentRef}
+												value={newContent}
+												onChange={(e) => setNewContent(e.target.value)}
+												onKeyDown={(e) =>
+													handleMarkdownEditorKeyDown(e, {
+														isAdmin: !!isAdminEditor,
+														text: newContent,
+														apply: applyEditResult
+													})
+												}
+												rows={10}
+												className="min-h-[220px]"
+												required
 											/>
 										</div>
-									) : null}
+										{previewOpen ? (
+											<div className="rounded-md border bg-muted/20 p-3">
+												<div className="mb-2 text-xs font-medium text-muted-foreground">预览</div>
+												<div
+													ref={previewRef}
+													className="prose max-w-none break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
+													dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(newContent || '') }}
+												/>
+											</div>
+										) : null}
+									</div>
 								</div>
-							</div>
-								{/* image upload button */}
-		<div className="space-y-2">
-			<label className="block text-sm font-medium text-muted-foreground">上传图片</label>
-			<input
-				type="file"
-				accept="image/*"
-				className="block w-full text-sm"
-				onChange={async (e) => {
-					const file = e.target.files && e.target.files[0];
-					if (!file) return;
-					setUploadError('');
-					// allow up to 2MB
-					if (file.size > 2 * 1024 * 1024) {
-						setUploadError('文件过大 (最大 2MB)');
-						return;
-					}
-					setUploadLoading(true);
-					try {
-						const formData = new FormData();
-						formData.append('file', file);
-						formData.append('type', 'post');
-						const res = await fetch('/api/upload', {
-							method: 'POST',
-							headers: getSecurityHeaders('POST', null),
-							body: formData
-						});
-						const data = await res.json();
-						if (!res.ok) throw new Error(data?.error || '上传失败');
-                        // insert markdown link at cursor and ensure preview is visible
-                        insertIntoContent(`
-
-![](${data.url})
-
-`);
-                        setPreviewOpen(true);
-					} catch (err: any) {
-						setUploadError(String(err?.message || err));
-					} finally {
-						setUploadLoading(false);
-					}
-				}}
-			/>
-			{uploadError ? <div className="text-sm text-destructive">{uploadError}</div> : null}
-			{uploadLoading ? <div className="text-sm text-muted-foreground">上传中…</div> : null}
-		</div>
 		<TurnstileWidget enabled={turnstileActive} siteKey={siteKey} onToken={setTurnstileToken} resetKey={turnstileResetKey} />
 
 								<label className="flex flex-col gap-1 text-sm">

@@ -4,6 +4,7 @@ import { generateIdenticonSvg } from './identicon';
 import { uploadImage, deleteImage, listAllKeys, getPublicUrl, getKeyFromUrl, uploadAvatarBytes, uploadAvatarDataUri, S3Env } from './s3';
 import * as OTPAuth from 'otpauth';
 import { Security, UserPayload } from './security';
+import { assertContentModeration, invalidateModerationWordCache } from './content-policy';
 
 interface DBUser {
     id: number;
@@ -123,7 +124,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -324,6 +325,12 @@ export default {
   ip_address TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`,
+					`CREATE TABLE IF NOT EXISTS moderation_words (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  word TEXT NOT NULL UNIQUE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('turnstile_enabled', '0');`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_title', 'liuyuliangbox / Project Turn');`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_tagline', '由 Cloudflare Workers、Pages、D1、R2 提供服务。');`,
@@ -407,6 +414,18 @@ export default {
 				).run();
 			} catch {
 				// column already exists
+			}
+			try {
+				await env.cforum_db.prepare(
+					`CREATE TABLE IF NOT EXISTS moderation_words (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  word TEXT NOT NULL UNIQUE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`
+				).run();
+			} catch (e) {
+				console.error('Failed to ensure moderation_words table', e);
 			}
 			try {
 				const needsSortBackfill = await env.cforum_db
@@ -858,6 +877,62 @@ export default {
 				}
 				
 				return jsonResponse(config);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/admin/moderation-words
+		if (url.pathname === '/api/admin/moderation-words' && method === 'GET') {
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const { results } = await env.cforum_db
+					.prepare(
+						`SELECT id, word, enabled, created_at FROM moderation_words ORDER BY id DESC`
+					)
+					.all();
+				return jsonResponse(results || []);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/admin/moderation-words
+		if (url.pathname === '/api/admin/moderation-words' && method === 'POST') {
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const body = (await request.json()) as any;
+				const word = String(body?.word || '').trim();
+				if (!word) return jsonResponse({ error: '请输入敏感词' }, 400);
+				if (word.length > 64) return jsonResponse({ error: '敏感词过长（最多 64 字符）' }, 400);
+				try {
+					await env.cforum_db
+						.prepare(`INSERT INTO moderation_words (word, enabled) VALUES (?, 1)`)
+						.bind(word)
+						.run();
+				} catch {
+					return jsonResponse({ error: '该敏感词已存在' }, 400);
+				}
+				invalidateModerationWordCache();
+				await security.logAudit(userPayload.id, 'ADD_MODERATION_WORD', 'moderation_word', word, {}, request);
+				return jsonResponse({ success: true });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// DELETE /api/admin/moderation-words/:id
+		if (url.pathname.match(/^\/api\/admin\/moderation-words\/\d+$/) && method === 'DELETE') {
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const id = url.pathname.split('/')[4];
+				await env.cforum_db.prepare(`DELETE FROM moderation_words WHERE id = ?`).bind(id).run();
+				invalidateModerationWordCache();
+				await security.logAudit(userPayload.id, 'DELETE_MODERATION_WORD', 'moderation_word', id, {}, request);
+				return jsonResponse({ success: true });
 			} catch (e) {
 				return handleError(e);
 			}
@@ -2699,6 +2774,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (content.length > 3000) return jsonResponse({ error: 'Content too long (Max 3000 chars)' }, 400);
 				if (hasControlCharacters(title) || hasControlCharacters(content)) return jsonResponse({ error: 'Title or content contains invalid control characters' }, 400);
 
+				const moderationErr = await assertContentModeration(env.cforum_db, `${title}\n${content}`);
+				if (moderationErr) return jsonResponse({ error: moderationErr }, 400);
+
 				// Validate Category + announcement restriction
 				const category = await env.cforum_db
 					.prepare('SELECT id, admin_only FROM categories WHERE id = ?')
@@ -2809,6 +2887,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (hasInvisibleCharacters(content)) return jsonResponse({ error: 'Content contains invalid invisible characters' }, 400);
 				if (content.length > 3000) return jsonResponse({ error: 'Content too long (Max 3000 chars)' }, 400);
 				if (hasControlCharacters(content)) return jsonResponse({ error: 'Content contains invalid control characters' }, 400);
+
+				const moderationErr = await assertContentModeration(env.cforum_db, content);
+				if (moderationErr) return jsonResponse({ error: moderationErr }, 400);
 
 				const post = await env.cforum_db.prepare('SELECT id FROM posts WHERE id = ?').bind(postId).first();
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
@@ -2984,6 +3065,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (content.length > 3000) return jsonResponse({ error: 'Content too long (Max 3000 chars)' }, 400);
 
 				if (hasControlCharacters(title) || hasControlCharacters(content)) return jsonResponse({ error: 'Title or content contains invalid control characters' }, 400);
+
+				const moderationErr = await assertContentModeration(env.cforum_db, `${title}\n${content}`);
+				if (moderationErr) return jsonResponse({ error: moderationErr }, 400);
 
 				// HTML Escape Content (Backend Enforcement)
 				content = content

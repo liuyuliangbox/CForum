@@ -58,6 +58,11 @@ export function AdminPage() {
 	const [editingCategoryShowOnForum, setEditingCategoryShowOnForum] = React.useState(true);
 	const [editingCategorySubtitle, setEditingCategorySubtitle] = React.useState('');
 
+	const [moderationWords, setModerationWords] = React.useState<
+		Array<{ id: number; word: string; enabled: number; created_at: string }>
+	>([]);
+	const [newModerationWord, setNewModerationWord] = React.useState('');
+
 	const [editOpen, setEditOpen] = React.useState(false);
 	const [editUserId, setEditUserId] = React.useState<number | null>(null);
 	const [editEmail, setEditEmail] = React.useState('');
@@ -80,15 +85,19 @@ export function AdminPage() {
 		setLoading(true);
 		setError('');
 		try {
-			const [s, u, c, settings] = await Promise.all([
+			const [s, u, c, settings, words] = await Promise.all([
 				apiFetch<{ users: number; posts: number; comments: number }>('/admin/stats', { headers: getSecurityHeaders('GET') }),
 				apiFetch<any[]>('/admin/users', { headers: getSecurityHeaders('GET') }),
 				apiFetch<Category[]>('/categories'),
-				apiFetch<any>('/admin/settings', { headers: getSecurityHeaders('GET') })
+				apiFetch<any>('/admin/settings', { headers: getSecurityHeaders('GET') }),
+				apiFetch<Array<{ id: number; word: string; enabled: number; created_at: string }>>('/admin/moderation-words', {
+					headers: getSecurityHeaders('GET')
+				})
 			]);
 			setStats(s);
 			setUsers(u as any);
 			setCategories(c);
+			setModerationWords(Array.isArray(words) ? words : []);
 			let friendLinks: Array<{ label: string; url: string }> = [
 				{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }
 			];
@@ -151,6 +160,45 @@ export function AdminPage() {
 			});
 			invalidateConfigCache();
 			alert('设置已保存');
+		} catch (e: any) {
+			setError(String(e?.message || e));
+		} finally {
+			setLoading(false);
+		}
+	}
+
+	async function addModerationWord() {
+		if (!isAdmin) return;
+		const word = newModerationWord.trim();
+		if (!word) return;
+		setLoading(true);
+		setError('');
+		try {
+			await apiFetch('/admin/moderation-words', {
+				method: 'POST',
+				headers: getSecurityHeaders('POST'),
+				body: JSON.stringify({ word })
+			});
+			setNewModerationWord('');
+			await refresh();
+		} catch (e: any) {
+			setError(String(e?.message || e));
+		} finally {
+			setLoading(false);
+		}
+	}
+
+	async function deleteModerationWord(id: number) {
+		if (!isAdmin) return;
+		if (!confirm('确定删除该敏感词？')) return;
+		setLoading(true);
+		setError('');
+		try {
+			await apiFetch(`/admin/moderation-words/${id}`, {
+				method: 'DELETE',
+				headers: getSecurityHeaders('DELETE')
+			});
+			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
 		} finally {
@@ -608,6 +656,46 @@ export function AdminPage() {
 								<Button onClick={saveSettings} disabled={loading}>
 									{loading ? '保存中...' : '保存设置'}
 								</Button>
+							</CardContent>
+						</Card>
+
+						<Card>
+							<CardHeader>
+								<CardTitle>内容审查 / 敏感词</CardTitle>
+							</CardHeader>
+							<CardContent className="space-y-4">
+								<p className="text-sm text-muted-foreground">
+									发帖、改帖与评论命中敏感词将拒绝发布。外链仅允许 aridjaya.eu.org 及其子域。
+								</p>
+								<div className="flex flex-wrap items-end gap-3">
+									<div className="min-w-[220px] flex-1 space-y-2">
+										<Label htmlFor="moderation-word">新增敏感词</Label>
+										<Input
+											id="moderation-word"
+											value={newModerationWord}
+											onChange={(e) => setNewModerationWord(e.target.value)}
+											placeholder="例如：外挂"
+											maxLength={64}
+										/>
+									</div>
+									<Button type="button" onClick={() => void addModerationWord()} disabled={loading || !newModerationWord.trim()}>
+										添加
+									</Button>
+								</div>
+								{moderationWords.length ? (
+									<ul className="divide-y rounded-md border">
+										{moderationWords.map((w) => (
+											<li key={w.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+												<span className="break-all font-medium">{w.word}</span>
+												<Button type="button" variant="outline" size="sm" onClick={() => void deleteModerationWord(w.id)}>
+													删除
+												</Button>
+											</li>
+										))}
+									</ul>
+								) : (
+									<p className="text-sm text-muted-foreground">暂无敏感词，可在上方添加。</p>
+								)}
 							</CardContent>
 						</Card>
 

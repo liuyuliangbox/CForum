@@ -1,6 +1,7 @@
 import * as React from 'react';
-import { ArrowLeft, Eye, EyeOff, Heart, MoreVertical, Pin, Pencil, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
+import { ArrowLeft, Heart, MoreVertical, Pin, Pencil, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
 
+import { MarkdownToolbar } from '@/components/markdown-toolbar';
 import { TurnstileWidget } from '@/components/turnstile';
 import { PageShell } from '@/components/page-shell';
 import { Button } from '@/components/ui/button';
@@ -19,7 +20,14 @@ import {
 	type Post
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
+import { assertAllowedContentUrls } from '@/lib/content-policy';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
+import {
+	handleMarkdownEditorKeyDown,
+	runMarkdownAction,
+	type EditResult,
+	type MarkdownEditorAction
+} from '@/lib/markdown-editor';
 import { validateText } from '@/lib/validators';
 
 export function PostPage() {
@@ -50,22 +58,67 @@ export function PostPage() {
 	const [uploadLoading, setUploadLoading] = React.useState(false);
 	const [uploadError, setUploadError] = React.useState('');
 	const editContentRef = React.useRef<HTMLTextAreaElement | null>(null);
+	const editImageInputRef = React.useRef<HTMLInputElement | null>(null);
+	const isAdminEditor = user?.role === 'admin';
+
+	function applyEditResult(result: EditResult) {
+		setEditContent(result.text);
+		setTimeout(() => {
+			const target = editContentRef.current;
+			if (!target) return;
+			target.selectionStart = result.selectionStart;
+			target.selectionEnd = result.selectionEnd;
+			target.focus();
+		}, 0);
+	}
 
 	function insertIntoEditContent(insertText: string) {
-		if (editContentRef.current) {
-			const el = editContentRef.current;
-			const start = el.selectionStart;
-			const end = el.selectionEnd;
-			const before = editContent.slice(0, start);
-			const after = editContent.slice(end);
-			const updated = before + insertText + after;
-			setEditContent(updated);
-			setTimeout(() => {
-				el.selectionStart = el.selectionEnd = start + insertText.length;
-				el.focus();
-			}, 0);
-		} else {
-			setEditContent(editContent + insertText);
+		const el = editContentRef.current;
+		const start = el ? el.selectionStart : editContent.length;
+		const end = el ? el.selectionEnd : editContent.length;
+		applyEditResult({
+			text: editContent.slice(0, start) + insertText + editContent.slice(end),
+			selectionStart: start + insertText.length,
+			selectionEnd: start + insertText.length
+		});
+	}
+
+	function onEditorAction(action: MarkdownEditorAction) {
+		const el = editContentRef.current;
+		const start = el ? el.selectionStart : editContent.length;
+		const end = el ? el.selectionEnd : editContent.length;
+		applyEditResult(runMarkdownAction(editContent, start, end, action));
+	}
+
+	async function handleEditImageFile(file: File) {
+		setUploadError('');
+		setEditError('');
+		if (file.size > 2 * 1024 * 1024) {
+			setEditError('文件过大 (最大 2MB)');
+			return;
+		}
+		setUploadLoading(true);
+		try {
+			const formData = new FormData();
+			formData.append('file', file);
+			formData.append('type', 'post');
+			const res = await fetch('/api/upload', {
+				method: 'POST',
+				headers: getSecurityHeaders('POST', null),
+				body: formData
+			});
+			const data = await res.json();
+			if (!res.ok) throw new Error(data?.error || '上传失败');
+			insertIntoEditContent(`
+
+![](${data.url})
+
+`);
+			setEditPreviewOpen(true);
+		} catch (err: any) {
+			setEditError(String(err?.message || err));
+		} finally {
+			setUploadLoading(false);
 		}
 	}
 	const contentRef = React.useRef<HTMLDivElement | null>(null);
@@ -219,6 +272,8 @@ export function PostPage() {
 		const err = validateText(newComment, '评论');
 		if (err) return setCommentError(err);
 		if (newComment.length > 3000) return setCommentError('评论过长 (最多 3000 字符)');
+		const urlErr = assertAllowedContentUrls(newComment);
+		if (urlErr) return setCommentError(urlErr);
 		if (turnstileActive && !turnstileToken) return setCommentError('请完成验证码验证');
 
 		setCommentLoading(true);
@@ -412,6 +467,8 @@ export function PostPage() {
 		if (contentErr) return setEditError(contentErr);
 		if (editTitle.length > 30) return setEditError('标题过长 (最多 30 字符)');
 		if (editContent.length > 3000) return setEditError('内容过长 (最多 3000 字符)');
+		const urlErr = assertAllowedContentUrls(`${editTitle}\n${editContent}`);
+		if (urlErr) return setEditError(urlErr);
 
 		setEditLoading(true);
 		try {
@@ -647,68 +704,55 @@ export function PostPage() {
 											<Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} maxLength={30} />
 										</div>
 										<div className="space-y-2">
-											<div className="flex items-center justify-end">
-												<Button type="button" variant="outline" size="sm" onClick={() => setEditPreviewOpen((v) => !v)}>
-													{editPreviewOpen ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-													<span className="sr-only">{editPreviewOpen ? '关闭预览' : '打开预览'}</span>
-												</Button>
-											</div>
-											<Textarea ref={editContentRef} value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={10} />
-										</div>
-                        {/* upload image when editing */}
-                        <div className="space-y-2">
-                            <label className="block text-sm font-medium text-muted-foreground">上传图片</label>
-                            <input
-                                type="file"
-                                accept="image/*"
-                                className="block w-full text-sm"
-                                onChange={async (e) => {
-                                    const file = e.target.files && e.target.files[0];
-                                    if (!file) return;
-                                    setEditError('');
-                                    if (file.size > 2 * 1024 * 1024) {
-                                        setEditError('文件过大 (最大 2MB)');
-                                        return;
-                                    }
-                                    setUploadLoading(true);
-                                    try {
-                                        const formData = new FormData();
-                                        formData.append('file', file);
-                                        formData.append('type', 'post');
-                                        const res = await fetch('/api/upload', {
-                                            method: 'POST',
-                                            headers: getSecurityHeaders('POST', null),
-                                            body: formData,
-                                        });
-                                        const data = await res.json();
-                                        if (!res.ok) throw new Error(data?.error || '上传失败');
-                                        // insert link at cursor and show preview
-                                        insertIntoEditContent(`
-
-![](${data.url})
-
-`);
-                                        setEditPreviewOpen(true);
-                                    } catch (err: any) {
-                                        setEditError(String(err?.message || err));
-                                    } finally {
-                                        setUploadLoading(false);
-                                    }
-                                }}
-                            />
-                            {uploadError ? <div className="text-sm text-destructive">{uploadError}</div> : null}
-                            {uploadLoading ? <div className="text-sm text-muted-foreground">上传中…</div> : null}
-                        </div>
-										{editPreviewOpen ? (
-<div className="rounded-md border bg-muted/20 p-3">
-												<div className="mb-2 text-xs font-medium text-muted-foreground">预览</div>
-												<div
-													ref={editPreviewRef}
-													className="prose max-w-none break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
-													dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(editContent || '') }}
+											<div className="flex flex-wrap items-center justify-end gap-2">
+												<MarkdownToolbar
+													isAdmin={!!isAdminEditor}
+													previewOpen={editPreviewOpen}
+													onTogglePreview={() => setEditPreviewOpen((v) => !v)}
+													onAction={onEditorAction}
+													onPickImage={() => editImageInputRef.current?.click()}
 												/>
 											</div>
-										) : null}
+											<input
+												ref={editImageInputRef}
+												type="file"
+												accept="image/*"
+												className="hidden"
+												onChange={async (e) => {
+													const file = e.target.files && e.target.files[0];
+													e.target.value = '';
+													if (!file) return;
+													await handleEditImageFile(file);
+												}}
+											/>
+											{uploadError ? <div className="text-sm text-destructive">{uploadError}</div> : null}
+											{uploadLoading ? <div className="text-sm text-muted-foreground">上传中…</div> : null}
+											<div className={editPreviewOpen ? 'grid gap-3 lg:grid-cols-2' : 'space-y-2'}>
+												<Textarea
+													ref={editContentRef}
+													value={editContent}
+													onChange={(e) => setEditContent(e.target.value)}
+													onKeyDown={(e) =>
+														handleMarkdownEditorKeyDown(e, {
+															isAdmin: !!isAdminEditor,
+															text: editContent,
+															apply: applyEditResult
+														})
+													}
+													rows={10}
+												/>
+												{editPreviewOpen ? (
+													<div className="rounded-md border bg-muted/20 p-3">
+														<div className="mb-2 text-xs font-medium text-muted-foreground">预览</div>
+														<div
+															ref={editPreviewRef}
+															className="prose max-w-none break-words [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1"
+															dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(editContent || '') }}
+														/>
+													</div>
+												) : null}
+											</div>
+										</div>
 										<Button onClick={saveEdit} disabled={editLoading}>
 											{editLoading ? '保存中...' : '保存'}
 										</Button>
