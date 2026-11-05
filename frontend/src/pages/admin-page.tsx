@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { invalidateConfigCache } from '@/hooks/use-config';
 import { apiFetch, getSecurityHeaders, type Category } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
 import { DEFAULT_SITE_TAGLINE, DEFAULT_SITE_TITLE } from '@/lib/site';
@@ -148,6 +149,7 @@ export function AdminPage() {
 				headers: getSecurityHeaders('POST'),
 				body: JSON.stringify(systemSettings)
 			});
+			invalidateConfigCache();
 			alert('设置已保存');
 		} catch (e: any) {
 			setError(String(e?.message || e));
