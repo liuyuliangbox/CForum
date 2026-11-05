@@ -19,6 +19,13 @@ import {
 	recordModerationReject,
 	setPostingCooldownHours
 } from './rate-limit';
+import {
+	DEFAULT_OPS_PLAYBOOK,
+	defaultStatusForOptions,
+	isValidStatusForOptions,
+	parseStatusOptions,
+	serializeStatusOptions
+} from './category-status';
 
 interface DBUser {
     id: number;
@@ -138,7 +145,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -445,6 +452,79 @@ export default {
 				await env.cforum_db.prepare(`ALTER TABLE users ADD COLUMN posting_cooldown_until TIMESTAMP`).run();
 			} catch {
 				// column already exists
+			}
+			try {
+				await env.cforum_db
+					.prepare(`ALTER TABLE categories ADD COLUMN status_options TEXT NOT NULL DEFAULT '[]'`)
+					.run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db
+					.prepare(`ALTER TABLE categories ADD COLUMN author_can_set_status INTEGER NOT NULL DEFAULT 0`)
+					.run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db.prepare(`ALTER TABLE posts ADD COLUMN status TEXT`).run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db
+					.prepare(
+						`CREATE TABLE IF NOT EXISTS post_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`
+					)
+					.run();
+				await env.cforum_db
+					.prepare(
+						`CREATE TABLE IF NOT EXISTS post_template_categories (
+  template_id INTEGER NOT NULL,
+  category_id INTEGER NOT NULL,
+  PRIMARY KEY (template_id, category_id),
+  FOREIGN KEY (template_id) REFERENCES post_templates(id) ON DELETE CASCADE,
+  FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+)`
+					)
+					.run();
+			} catch (e) {
+				console.error('Failed to ensure post_templates tables', e);
+			}
+			try {
+				await env.cforum_db
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('ops_playbook', ?)`)
+					.bind(DEFAULT_OPS_PLAYBOOK)
+					.run();
+			} catch (e) {
+				console.error('Failed to seed ops_playbook', e);
+			}
+			try {
+				await env.cforum_db
+					.prepare(
+						`UPDATE categories SET status_options = ?
+						 WHERE name = 'Bug/体验'
+						   AND (status_options IS NULL OR status_options = '' OR status_options = '[]')`
+					)
+					.bind(JSON.stringify(['待处理', '确认中', '已排期', '已修复', '不予采纳']))
+					.run();
+				await env.cforum_db
+					.prepare(
+						`UPDATE categories SET status_options = ?
+						 WHERE name = '玩法建议'
+						   AND (status_options IS NULL OR status_options = '' OR status_options = '[]')`
+					)
+					.bind(JSON.stringify(['收集中', '已排期', '已采纳', '暂不采纳']))
+					.run();
+			} catch (e) {
+				console.error('Failed to seed category status_options', e);
 			}
 			try {
 				const needsSortBackfill = await env.cforum_db
@@ -799,7 +879,8 @@ export default {
 			'community_home_url',
 			'footer_rights',
 			'friend_links',
-			'allowed_link_hosts'
+			'allowed_link_hosts',
+			'ops_playbook'
 		]);
 		const DEFAULT_FRIEND_LINKS_JSON = JSON.stringify([
 			{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }
@@ -814,7 +895,8 @@ export default {
 			community_home_url: 'https://bbs.aridjaya.eu.org',
 			footer_rights: '保留所有权利。',
 			friend_links: DEFAULT_FRIEND_LINKS_JSON,
-			allowed_link_hosts: DEFAULT_ALLOWED_LINK_HOSTS_JSON
+			allowed_link_hosts: DEFAULT_ALLOWED_LINK_HOSTS_JSON,
+			ops_playbook: DEFAULT_OPS_PLAYBOOK
 		};
 
 		const normalizeFriendLinksJson = (raw: unknown): string => {
@@ -984,7 +1066,8 @@ export default {
 					community_home_url,
 					footer_rights,
 					friend_links,
-					allowed_link_hosts
+					allowed_link_hosts,
+					ops_playbook
 				} = body;
 				
 				const stmt = env.cforum_db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
@@ -1010,6 +1093,9 @@ export default {
 				if (friend_links !== undefined) batch.push(stmt.bind('friend_links', normalizeFriendLinksJson(friend_links)));
 				if (allowed_link_hosts !== undefined) {
 					batch.push(stmt.bind('allowed_link_hosts', serializeAllowedLinkHosts(allowed_link_hosts)));
+				}
+				if (ops_playbook !== undefined) {
+					batch.push(stmt.bind('ops_playbook', String(ops_playbook || '').slice(0, 20000)));
 				}
 				
 				if (batch.length > 0) await env.cforum_db.batch(batch);
@@ -1636,6 +1722,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 							IFNULL(show_on_site, 0) AS show_on_site,
 							IFNULL(show_on_forum, 1) AS show_on_forum,
 							IFNULL(sort_order, 0) AS sort_order,
+							IFNULL(status_options, '[]') AS status_options,
+							IFNULL(author_can_set_status, 0) AS author_can_set_status,
 							created_at
 						 FROM categories
 						 ORDER BY IFNULL(sort_order, 0) ASC, id ASC`
@@ -1648,7 +1736,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						admin_only: Number(row.admin_only) === 1,
 						show_on_site: Number(row.show_on_site) === 1,
 						show_on_forum: Number(row.show_on_forum) === 1,
-						sort_order: Number(row.sort_order || 0)
+						sort_order: Number(row.sort_order || 0),
+						status_options: parseStatusOptions(row.status_options),
+						author_can_set_status: Number(row.author_can_set_status) === 1
 					}))
 				);
 			} catch (e) {
@@ -1821,6 +1911,145 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			}
 		}
 
+		// GET /api/post-templates?category_id=
+		if (url.pathname === '/api/post-templates' && method === 'GET') {
+			try {
+				const categoryId = url.searchParams.get('category_id');
+				if (!categoryId) return jsonResponse([]);
+				const { results } = await env.cforum_db
+					.prepare(
+						`SELECT t.id, t.name, t.body, t.sort_order
+						 FROM post_templates t
+						 JOIN post_template_categories tc ON tc.template_id = t.id
+						 WHERE tc.category_id = ?
+						 ORDER BY t.sort_order ASC, t.id ASC`
+					)
+					.bind(categoryId)
+					.all();
+				return jsonResponse(results || []);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/admin/post-templates
+		if (url.pathname === '/api/admin/post-templates' && method === 'GET') {
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const { results: templates } = await env.cforum_db
+					.prepare(
+						`SELECT id, name, body, sort_order, created_at FROM post_templates ORDER BY sort_order ASC, id DESC`
+					)
+					.all();
+				const { results: links } = await env.cforum_db
+					.prepare(`SELECT template_id, category_id FROM post_template_categories`)
+					.all<{ template_id: number; category_id: number }>();
+				const byTpl = new Map<number, number[]>();
+				for (const row of links || []) {
+					const list = byTpl.get(row.template_id) || [];
+					list.push(row.category_id);
+					byTpl.set(row.template_id, list);
+				}
+				return jsonResponse(
+					(templates || []).map((t: any) => ({
+						...t,
+						category_ids: byTpl.get(Number(t.id)) || []
+					}))
+				);
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/admin/post-templates
+		if (url.pathname === '/api/admin/post-templates' && method === 'POST') {
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const body = (await request.json()) as any;
+				const name = String(body?.name || '').trim().slice(0, 40);
+				const tplBody = String(body?.body || '').slice(0, 3000);
+				const categoryIds = Array.isArray(body?.category_ids)
+					? body.category_ids.map((x: any) => Number(x)).filter((n: number) => Number.isFinite(n) && n > 0)
+					: [];
+				if (!name) return jsonResponse({ error: '请输入模板名称' }, 400);
+				const maxOrder =
+					(
+						await env.cforum_db
+							.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM post_templates')
+							.first<{ m: number }>()
+					)?.m ?? 0;
+				const inserted = await env.cforum_db
+					.prepare(`INSERT INTO post_templates (name, body, sort_order) VALUES (?, ?, ?)`)
+					.bind(name, tplBody, maxOrder + 1)
+					.run();
+				const templateId = Number(inserted.meta?.last_row_id);
+				if (templateId && categoryIds.length) {
+					const stmt = env.cforum_db.prepare(
+						`INSERT OR IGNORE INTO post_template_categories (template_id, category_id) VALUES (?, ?)`
+					);
+					await env.cforum_db.batch(categoryIds.map((cid: number) => stmt.bind(templateId, cid)));
+				}
+				await security.logAudit(userPayload.id, 'CREATE_POST_TEMPLATE', 'post_template', String(templateId), {
+					name,
+					category_ids: categoryIds
+				}, request);
+				return jsonResponse({ success: true, id: templateId });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// PUT /api/admin/post-templates/:id
+		if (url.pathname.match(/^\/api\/admin\/post-templates\/\d+$/) && method === 'PUT') {
+			const id = url.pathname.split('/')[4];
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const body = (await request.json()) as any;
+				const name = String(body?.name || '').trim().slice(0, 40);
+				const tplBody = String(body?.body || '').slice(0, 3000);
+				const categoryIds = Array.isArray(body?.category_ids)
+					? body.category_ids.map((x: any) => Number(x)).filter((n: number) => Number.isFinite(n) && n > 0)
+					: [];
+				if (!name) return jsonResponse({ error: '请输入模板名称' }, 400);
+				await env.cforum_db
+					.prepare(`UPDATE post_templates SET name = ?, body = ? WHERE id = ?`)
+					.bind(name, tplBody, id)
+					.run();
+				await env.cforum_db.prepare(`DELETE FROM post_template_categories WHERE template_id = ?`).bind(id).run();
+				if (categoryIds.length) {
+					const stmt = env.cforum_db.prepare(
+						`INSERT OR IGNORE INTO post_template_categories (template_id, category_id) VALUES (?, ?)`
+					);
+					await env.cforum_db.batch(categoryIds.map((cid: number) => stmt.bind(id, cid)));
+				}
+				await security.logAudit(userPayload.id, 'UPDATE_POST_TEMPLATE', 'post_template', id, {
+					name,
+					category_ids: categoryIds
+				}, request);
+				return jsonResponse({ success: true });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// DELETE /api/admin/post-templates/:id
+		if (url.pathname.match(/^\/api\/admin\/post-templates\/\d+$/) && method === 'DELETE') {
+			const id = url.pathname.split('/')[4];
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				await env.cforum_db.prepare(`DELETE FROM post_template_categories WHERE template_id = ?`).bind(id).run();
+				await env.cforum_db.prepare(`DELETE FROM post_templates WHERE id = ?`).bind(id).run();
+				await security.logAudit(userPayload.id, 'DELETE_POST_TEMPLATE', 'post_template', id, {}, request);
+				return jsonResponse({ success: true });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
 		// POST /api/admin/categories
 		if (url.pathname === '/api/admin/categories' && method === 'POST') {
 			try {
@@ -1828,9 +2057,11 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { name, admin_only, show_on_site, show_on_forum, subtitle } = body;
+				const { name, admin_only, show_on_site, show_on_forum, subtitle, status_options, author_can_set_status } =
+					body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				const subtitleValue = show_on_site ? String(subtitle || '').trim().slice(0, 200) : '';
+				const statusOptionsJson = serializeStatusOptions(status_options);
 				const maxOrder =
 					(
 						await env.cforum_db
@@ -1841,7 +2072,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				
 				const { success } = await env.cforum_db
 					.prepare(
-						'INSERT INTO categories (name, subtitle, admin_only, show_on_site, show_on_forum, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
+						`INSERT INTO categories
+							(name, subtitle, admin_only, show_on_site, show_on_forum, sort_order, status_options, author_can_set_status)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 					)
 					.bind(
 						name,
@@ -1849,7 +2082,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						admin_only ? 1 : 0,
 						show_on_site ? 1 : 0,
 						show_on_forum === false || show_on_forum === 0 ? 0 : 1,
-						sortOrder
+						sortOrder,
+						statusOptionsJson,
+						author_can_set_status ? 1 : 0
 					)
 					.run();
 				bumpMetaCacheVersion();
@@ -1858,7 +2093,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					show_on_site: !!show_on_site,
 					show_on_forum: !(show_on_forum === false || show_on_forum === 0),
 					subtitle: subtitleValue,
-					sort_order: sortOrder
+					sort_order: sortOrder,
+					status_options: parseStatusOptions(statusOptionsJson),
+					author_can_set_status: !!author_can_set_status
 				}, request);
 				return jsonResponse({ success });
 			} catch (e) {
@@ -1874,13 +2111,16 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 
 				const body = await request.json() as any;
-				const { name, admin_only, show_on_site, show_on_forum, subtitle } = body;
+				const { name, admin_only, show_on_site, show_on_forum, subtitle, status_options, author_can_set_status } =
+					body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				const subtitleValue = show_on_site ? String(subtitle || '').trim().slice(0, 200) : '';
+				const statusOptionsJson = serializeStatusOptions(status_options);
 				
 				await env.cforum_db
 					.prepare(
-						'UPDATE categories SET name = ?, subtitle = ?, admin_only = ?, show_on_site = ?, show_on_forum = ? WHERE id = ?'
+						`UPDATE categories SET name = ?, subtitle = ?, admin_only = ?, show_on_site = ?, show_on_forum = ?,
+							status_options = ?, author_can_set_status = ? WHERE id = ?`
 					)
 					.bind(
 						name,
@@ -1888,6 +2128,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						admin_only ? 1 : 0,
 						show_on_site ? 1 : 0,
 						show_on_forum === false || show_on_forum === 0 ? 0 : 1,
+						statusOptionsJson,
+						author_can_set_status ? 1 : 0,
 						id
 					)
 					.run();
@@ -1897,7 +2139,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					admin_only: !!admin_only,
 					show_on_site: !!show_on_site,
 					show_on_forum: !(show_on_forum === false || show_on_forum === 0),
-					subtitle: subtitleValue
+					subtitle: subtitleValue,
+					status_options: parseStatusOptions(statusOptionsJson),
+					author_can_set_status: !!author_can_set_status
 				}, request);
 				return jsonResponse({ success: true });
 			} catch (e) {
@@ -2296,12 +2540,19 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const { category_id } = body;
 				
 				if (!category_id) return jsonResponse({ error: '请选择分类' }, 400);
-				const category = await env.cforum_db.prepare('SELECT id FROM categories WHERE id = ?').bind(category_id).first();
+				const category = await env.cforum_db
+					.prepare(`SELECT id, IFNULL(status_options, '[]') AS status_options FROM categories WHERE id = ?`)
+					.bind(category_id)
+					.first<{ id: number; status_options: string }>();
 				if (!category) return jsonResponse({ error: 'Category not found' }, 404);
+				const nextStatus = defaultStatusForOptions(parseStatusOptions(category.status_options));
 
-				await env.cforum_db.prepare('UPDATE posts SET category_id = ? WHERE id = ?').bind(category_id, id).run();
+				await env.cforum_db
+					.prepare('UPDATE posts SET category_id = ?, status = ? WHERE id = ?')
+					.bind(category_id, nextStatus, id)
+					.run();
 				
-				await security.logAudit(userPayload.id, 'ADMIN_MOVE_POST', 'post', id, { category_id }, request);
+				await security.logAudit(userPayload.id, 'ADMIN_MOVE_POST', 'post', id, { category_id, status: nextStatus }, request);
 				return jsonResponse({ success: true });
 			} catch (e) {
 				return handleError(e);
@@ -2552,14 +2803,20 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const sortDirRaw = (url.searchParams.get('sort_dir') || 'desc').trim().toLowerCase();
 				const sortDir = sortDirRaw === 'asc' ? 'ASC' : 'DESC';
 				
+				const statusFilter = (url.searchParams.get('status') || '').trim();
+				const unrepliedOnly =
+					url.searchParams.get('unreplied') === '1' || url.searchParams.get('unreplied') === 'true';
+
 				let query = `SELECT 
                         posts.id, posts.author_id, posts.title, posts.content, posts.category_id,
                         posts.is_pinned, posts.is_visible, posts.author_publish_until, posts.site_featured,
-                        posts.view_count, posts.created_at,
+                        posts.status, posts.view_count, posts.created_at,
                         users.username as author_name, 
                         users.avatar_url as author_avatar,
                         users.role as author_role,
                         categories.name as category_name,
+                        IFNULL(categories.status_options, '[]') as category_status_options,
+                        IFNULL(categories.author_can_set_status, 0) as category_author_can_set_status,
                         IFNULL(like_agg.like_count, 0) as like_count,
                         IFNULL(comment_agg.comment_count, 0) as comment_count
                      FROM posts 
@@ -2572,7 +2829,11 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
                         SELECT post_id, COUNT(*) AS comment_count FROM comments GROUP BY post_id
                      ) comment_agg ON comment_agg.post_id = posts.id`;
                 
-                let countQuery = `SELECT COUNT(*) as total FROM posts LEFT JOIN categories ON posts.category_id = categories.id`;
+                let countQuery = `SELECT COUNT(*) as total FROM posts
+					LEFT JOIN categories ON posts.category_id = categories.id
+					LEFT JOIN (
+                        SELECT post_id, COUNT(*) AS comment_count FROM comments GROUP BY post_id
+                     ) comment_agg ON comment_agg.post_id = posts.id`;
 
                 const params: any[] = [];
                 const countParams: any[] = [];
@@ -2593,6 +2854,16 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 
 				if (siteFeaturedOnly) {
 					conditions.push(`IFNULL(posts.site_featured, 0) = 1`);
+				}
+
+				if (unrepliedOnly) {
+					conditions.push(`IFNULL(comment_agg.comment_count, 0) = 0`);
+				}
+
+				if (statusFilter && categoryId) {
+					conditions.push(`posts.status = ?`);
+					params.push(statusFilter);
+					countParams.push(statusFilter);
 				}
 
 				if (mineOnly) {
@@ -2645,9 +2916,14 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
                 ]);
 
 				return jsonResponse({
-                    posts: postsResult.results,
-                    total: countResult ? countResult.total : 0
-                });
+					posts: (postsResult.results || []).map((row: any) => ({
+						...row,
+						status: row.status || null,
+						category_status_options: parseStatusOptions(row.category_status_options),
+						category_author_can_set_status: Number(row.category_author_can_set_status) === 1
+					})),
+					total: countResult ? countResult.total : 0
+				});
 			} catch (e) {
 				return handleError(e);
 			}
@@ -2663,12 +2939,14 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					`SELECT 
                         posts.id, posts.author_id, posts.title, posts.content, posts.category_id,
                         posts.is_pinned, posts.is_visible, posts.author_publish_until, posts.site_featured,
-                        posts.view_count, posts.created_at,
+                        posts.status, posts.view_count, posts.created_at,
                         users.username as author_name, 
                         users.avatar_url as author_avatar,
                         users.role as author_role,
                         categories.name as category_name,
 						IFNULL(categories.show_on_forum, 1) AS category_show_on_forum,
+						IFNULL(categories.status_options, '[]') AS category_status_options,
+						IFNULL(categories.author_can_set_status, 0) AS category_author_can_set_status,
                         (SELECT COUNT(*) FROM likes WHERE likes.post_id = posts.id) as like_count,
                         (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) as comment_count
                      FROM posts 
@@ -2703,7 +2981,63 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					(post as any).liked = !!like;
 				}
 
-				return jsonResponse(post);
+				return jsonResponse({
+					...post,
+					status: (post as any).status || null,
+					category_status_options: parseStatusOptions((post as any).category_status_options),
+					category_author_can_set_status: Number((post as any).category_author_can_set_status) === 1
+				});
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// POST /api/posts/:id/status — admin, or author when category.author_can_set_status
+		if (url.pathname.match(/^\/api\/posts\/\d+\/status$/) && method === 'POST') {
+			const postId = url.pathname.split('/')[3];
+			try {
+				const userPayload = await authenticate(request);
+				const body = (await request.json()) as any;
+				const nextStatus = String(body?.status || '').trim();
+				const post = await env.cforum_db
+					.prepare(
+						`SELECT posts.id, posts.author_id, posts.category_id,
+							IFNULL(categories.status_options, '[]') AS status_options,
+							IFNULL(categories.author_can_set_status, 0) AS author_can_set_status
+						 FROM posts
+						 LEFT JOIN categories ON posts.category_id = categories.id
+						 WHERE posts.id = ?`
+					)
+					.bind(postId)
+					.first<{
+						id: number;
+						author_id: number;
+						category_id: number | null;
+						status_options: string;
+						author_can_set_status: number;
+					}>();
+				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
+				const options = parseStatusOptions(post.status_options);
+				if (!options.length) return jsonResponse({ error: '该分类未启用帖子状态' }, 400);
+				if (!isValidStatusForOptions(nextStatus, options)) {
+					return jsonResponse({ error: '状态无效' }, 400);
+				}
+				const isAdmin = userPayload.role === 'admin';
+				const isAuthor = post.author_id === userPayload.id;
+				const authorAllowed = Number(post.author_can_set_status) === 1;
+				if (!isAdmin && !(isAuthor && authorAllowed)) {
+					return jsonResponse({ error: '无权修改状态' }, 403);
+				}
+				await env.cforum_db.prepare('UPDATE posts SET status = ? WHERE id = ?').bind(nextStatus, postId).run();
+				await security.logAudit(
+					userPayload.id,
+					'SET_POST_STATUS',
+					'post',
+					postId,
+					{ status: nextStatus },
+					request
+				);
+				return jsonResponse({ success: true, status: nextStatus });
 			} catch (e) {
 				return handleError(e);
 			}
@@ -3218,13 +3552,18 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 
 				// Validate Category + announcement restriction
 				const category = await env.cforum_db
-					.prepare('SELECT id, admin_only FROM categories WHERE id = ?')
+					.prepare(
+						`SELECT id, admin_only, IFNULL(status_options, '[]') AS status_options
+						 FROM categories WHERE id = ?`
+					)
 					.bind(category_id)
 					.first<any>();
 				if (!category) return jsonResponse({ error: 'Category not found' }, 400);
 				if (category.admin_only && userPayload.role !== 'admin') {
 					return jsonResponse({ error: '该分类仅管理员可发帖' }, 403);
 				}
+				const statusOptions = parseStatusOptions(category.status_options);
+				const initialStatus = defaultStatusForOptions(statusOptions);
 
 				const authorPublishUntil = isVisible
 					? null
@@ -3234,7 +3573,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 							.slice(0, 19);
 				const { success } = await env.cforum_db
 					.prepare(
-						'INSERT INTO posts (author_id, title, content, category_id, is_visible, author_publish_until) VALUES (?, ?, ?, ?, ?, ?)'
+						`INSERT INTO posts (author_id, title, content, category_id, is_visible, author_publish_until, status)
+						 VALUES (?, ?, ?, ?, ?, ?, ?)`
 					)
 					.bind(
 						userPayload.id,
@@ -3242,14 +3582,16 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						content.trim(),
 						category_id,
 						isVisible ? 1 : 0,
-						authorPublishUntil
+						authorPublishUntil,
+						initialStatus
 					)
 					.run();
 
 				await security.logAudit(userPayload.id, 'CREATE_POST', 'post', 'new', {
 					title_length: safeTitle.length,
 					is_visible: isVisible,
-					author_publish_until: authorPublishUntil
+					author_publish_until: authorPublishUntil,
+					status: initialStatus
 				}, request);
 
 				return jsonResponse({ success, author_publish_until: authorPublishUntil }, 201);

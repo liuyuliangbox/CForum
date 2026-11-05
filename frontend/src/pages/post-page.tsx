@@ -28,6 +28,7 @@ import {
 	type EditResult,
 	type MarkdownEditorAction
 } from '@/lib/markdown-editor';
+import { cn } from '@/lib/utils';
 import { validateText } from '@/lib/validators';
 
 export function PostPage() {
@@ -439,6 +440,21 @@ export function PostPage() {
 		}
 	}
 
+	async function setPostStatus(nextStatus: string) {
+		if (!post) return;
+		try {
+			await apiFetch(`/posts/${post.id}/status`, {
+				method: 'POST',
+				headers: getSecurityHeaders('POST'),
+				body: JSON.stringify({ status: nextStatus })
+			});
+			setPost((prev) => (prev ? { ...prev, status: nextStatus } : prev));
+			setAdminMenuOpen(false);
+		} catch (e: any) {
+			alert(String(e?.message || e));
+		}
+	}
+
 	async function adminMovePostCategory(categoryId: number) {
 		if (!post) return;
 		if (!user || user.role !== 'admin') return;
@@ -544,6 +560,11 @@ export function PostPage() {
 										{post.category_name ? (
 											<span className="inline-flex items-center rounded-full border border-white/40 bg-background/70 px-2 py-0.5 text-[11px] font-medium text-foreground backdrop-blur">
 												{post.category_name}
+											</span>
+										) : null}
+										{post.status ? (
+											<span className="inline-flex items-center rounded-full border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-900 dark:text-sky-100">
+												{post.status}
 											</span>
 										) : null}
 									</div>
@@ -670,6 +691,29 @@ export function PostPage() {
 															<Trash2 className="h-4 w-4" />
 															删除
 														</button>
+													) : null}
+													{(user.role === 'admin' ||
+														(user.id === post.author_id &&
+															!!post.category_author_can_set_status)) &&
+													Array.isArray(post.category_status_options) &&
+													post.category_status_options.length ? (
+														<>
+															<div className="my-1 h-px bg-border" />
+															<div className="px-2 py-1 text-xs font-medium text-muted-foreground">帖子状态</div>
+															{post.category_status_options.map((s) => (
+																<button
+																	key={s}
+																	type="button"
+																	className={cn(
+																		'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted',
+																		post.status === s ? 'bg-muted font-medium' : ''
+																	)}
+																	onClick={() => void setPostStatus(s)}
+																>
+																	{s}
+																</button>
+															))}
+														</>
 													) : null}
 													{user.role === 'admin' && post.author_role !== 'admin' ? (
 														<AdminCooldownMenuItems

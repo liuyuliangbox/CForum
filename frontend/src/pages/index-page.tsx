@@ -18,7 +18,8 @@ import {
 	getAuthorPublishRemainingMs,
 	getSecurityHeaders,
 	type Category,
-	type Post
+	type Post,
+	type PostTemplate
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
@@ -41,6 +42,8 @@ export function IndexPage() {
 	const [selectedCategory, setSelectedCategory] = React.useState<string>('');
 	const [siteFeaturedOnly, setSiteFeaturedOnly] = React.useState(false);
 	const [mineOnly, setMineOnly] = React.useState(false);
+	const [unrepliedOnly, setUnrepliedOnly] = React.useState(false);
+	const [statusFilter, setStatusFilter] = React.useState('');
 	const [searchInput, setSearchInput] = React.useState<string>('');
 	const [searchQuery, setSearchQuery] = React.useState<string>('');
 	const [posts, setPosts] = React.useState<Post[]>([]);
@@ -55,6 +58,7 @@ export function IndexPage() {
 	const [newContent, setNewContent] = React.useState('');
 	const [newCategoryId, setNewCategoryId] = React.useState<string>('');
 	const [newVisible, setNewVisible] = React.useState(true);
+	const [createTemplates, setCreateTemplates] = React.useState<PostTemplate[]>([]);
 	const [previewOpen, setPreviewOpen] = React.useState(() =>
 		typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : false
 	);
@@ -166,11 +170,14 @@ export function IndexPage() {
 				const categoryParam = selectedCategory ? `&category_id=${encodeURIComponent(selectedCategory)}` : '';
 				const featuredParam = siteFeaturedOnly ? '&site_featured=1' : '';
 				const mineParam = mineOnly ? '&mine=1' : '';
+				const unrepliedParam = unrepliedOnly ? '&unreplied=1' : '';
+				const statusParam =
+					selectedCategory && statusFilter ? `&status=${encodeURIComponent(statusFilter)}` : '';
 				const searchParam = searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : '';
 				const sortParam = `&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}`;
 				const headers = getSecurityHeaders('GET', null);
 				const res = await fetch(
-					`/api/posts?limit=${pageLimit}&offset=${offset}${categoryParam}${featuredParam}${mineParam}${searchParam}${sortParam}`,
+					`/api/posts?limit=${pageLimit}&offset=${offset}${categoryParam}${featuredParam}${mineParam}${unrepliedParam}${statusParam}${searchParam}${sortParam}`,
 					{ headers }
 				);
 				if (!res.ok) {
@@ -200,8 +207,40 @@ export function IndexPage() {
 				setLoading(false);
 			}
 		},
-		[selectedCategory, siteFeaturedOnly, mineOnly, searchQuery, sortOption, token]
+		[selectedCategory, siteFeaturedOnly, mineOnly, unrepliedOnly, statusFilter, searchQuery, sortOption, token]
 	);
+
+	const selectedCategoryMeta = React.useMemo(
+		() => categories.find((c) => String(c.id) === selectedCategory) || null,
+		[categories, selectedCategory]
+	);
+	const selectedStatusOptions = selectedCategoryMeta?.status_options || [];
+
+	React.useEffect(() => {
+		if (!selectedCategory || !selectedStatusOptions.length) {
+			setStatusFilter('');
+		} else if (statusFilter && !selectedStatusOptions.includes(statusFilter)) {
+			setStatusFilter('');
+		}
+	}, [selectedCategory, selectedStatusOptions, statusFilter]);
+
+	React.useEffect(() => {
+		if (!newCategoryId) {
+			setCreateTemplates([]);
+			return;
+		}
+		let cancelled = false;
+		void apiFetch<PostTemplate[]>(`/post-templates?category_id=${encodeURIComponent(newCategoryId)}`)
+			.then((list) => {
+				if (!cancelled) setCreateTemplates(Array.isArray(list) ? list : []);
+			})
+			.catch(() => {
+				if (!cancelled) setCreateTemplates([]);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [newCategoryId]);
 
 	React.useEffect(() => {
 		if (!user && mineOnly) {
@@ -556,6 +595,40 @@ export function IndexPage() {
 									由我发布
 								</button>
 							) : null}
+							<button
+								type="button"
+								aria-pressed={unrepliedOnly}
+								className={
+									unrepliedOnly
+										? 'inline-flex h-9 items-center gap-1 rounded-md border-0 bg-gradient-to-r from-slate-600 to-zinc-800 px-3 text-sm font-medium text-white shadow-sm'
+										: 'inline-flex h-9 items-center gap-1 rounded-md border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted/60'
+								}
+								onClick={() => {
+									setUnrepliedOnly((v) => !v);
+									setPageOffset(0);
+								}}
+							>
+								<MessageCircle className="h-3.5 w-3.5" />
+								零评论
+							</button>
+							{selectedStatusOptions.length ? (
+								<select
+									className="h-9 rounded-md border bg-background px-3 text-sm"
+									value={statusFilter}
+									onChange={(e) => {
+										setStatusFilter(e.target.value);
+										setPageOffset(0);
+									}}
+									aria-label="按状态筛选"
+								>
+									<option value="">全部状态</option>
+									{selectedStatusOptions.map((s) => (
+										<option key={s} value={s}>
+											{s}
+										</option>
+									))}
+								</select>
+							) : null}
 						</div>
 					</div>
 
@@ -733,6 +806,32 @@ export function IndexPage() {
 												))}
 										</select>
 									</div>
+									{createTemplates.length ? (
+										<div className="space-y-2">
+											<Label htmlFor="insert-template">插入模板</Label>
+											<select
+												id="insert-template"
+												className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+												defaultValue=""
+												onChange={(e) => {
+													const id = Number(e.target.value);
+													e.target.value = '';
+													if (!id) return;
+													const tpl = createTemplates.find((t) => t.id === id);
+													if (!tpl) return;
+													if (newContent.trim() && !confirm('当前内容将被模板覆盖，继续？')) return;
+													setNewContent(tpl.body || '');
+												}}
+											>
+												<option value="">选择模板填入正文…</option>
+												{createTemplates.map((t) => (
+													<option key={t.id} value={t.id}>
+														{t.name}
+													</option>
+												))}
+											</select>
+										</div>
+									) : null}
 								</div>
 								<div className="space-y-2">
 									<Label htmlFor="new-content">内容 (支持 Markdown)</Label>
@@ -877,6 +976,11 @@ export function IndexPage() {
 													已隐藏
 												</span>
 											) : null}
+											{p.status ? (
+												<span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-800 dark:text-sky-200">
+													{p.status}
+												</span>
+											) : null}
 										</div>
 										<div className="mt-2 text-base font-semibold text-foreground sm:text-lg">{p.title}</div>
 										<div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
@@ -957,6 +1061,11 @@ export function IndexPage() {
 															<span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-cyan-500 to-indigo-600 px-2 py-0.5 text-xs font-medium text-white shadow-sm">
 																<Star className="h-3.5 w-3.5 fill-white" />
 																官网精选
+															</span>
+														) : null}
+														{p.status ? (
+															<span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-xs font-medium text-sky-800 dark:text-sky-200">
+																{p.status}
 															</span>
 														) : null}
 														{isOwner ? (

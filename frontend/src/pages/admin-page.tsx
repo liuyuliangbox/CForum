@@ -10,9 +10,21 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { invalidateConfigCache } from '@/hooks/use-config';
-import { apiFetch, getSecurityHeaders, type Category } from '@/lib/api';
+import { apiFetch, getSecurityHeaders, type Category, type PostTemplate } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
 import { DEFAULT_SITE_TAGLINE, DEFAULT_SITE_TITLE } from '@/lib/site';
+
+function statusOptionsToText(options?: string[] | null): string {
+	return Array.isArray(options) && options.length ? options.join('\n') : '';
+}
+
+function textToStatusOptions(text: string): string[] {
+	return text
+		.split(/\r?\n/)
+		.map((s) => s.trim())
+		.filter(Boolean)
+		.slice(0, 20);
+}
 
 export function AdminPage() {
 	const token = getToken();
@@ -54,7 +66,8 @@ export function AdminPage() {
 			label: string;
 			url: string;
 		}>,
-		allowed_link_hosts_text: 'aridjaya.eu.org'
+		allowed_link_hosts_text: 'aridjaya.eu.org',
+		ops_playbook: ''
 	});
 
 	const [newCategoryName, setNewCategoryName] = React.useState('');
@@ -62,12 +75,22 @@ export function AdminPage() {
 	const [newCategoryShowOnSite, setNewCategoryShowOnSite] = React.useState(false);
 	const [newCategoryShowOnForum, setNewCategoryShowOnForum] = React.useState(true);
 	const [newCategorySubtitle, setNewCategorySubtitle] = React.useState('');
+	const [newCategoryStatusOptionsText, setNewCategoryStatusOptionsText] = React.useState('');
+	const [newCategoryAuthorCanSetStatus, setNewCategoryAuthorCanSetStatus] = React.useState(false);
 	const [editingCategoryId, setEditingCategoryId] = React.useState<number | null>(null);
 	const [editingCategoryName, setEditingCategoryName] = React.useState('');
 	const [editingCategoryAdminOnly, setEditingCategoryAdminOnly] = React.useState(false);
 	const [editingCategoryShowOnSite, setEditingCategoryShowOnSite] = React.useState(false);
 	const [editingCategoryShowOnForum, setEditingCategoryShowOnForum] = React.useState(true);
 	const [editingCategorySubtitle, setEditingCategorySubtitle] = React.useState('');
+	const [editingCategoryStatusOptionsText, setEditingCategoryStatusOptionsText] = React.useState('');
+	const [editingCategoryAuthorCanSetStatus, setEditingCategoryAuthorCanSetStatus] = React.useState(false);
+
+	const [postTemplates, setPostTemplates] = React.useState<PostTemplate[]>([]);
+	const [tplName, setTplName] = React.useState('');
+	const [tplBody, setTplBody] = React.useState('');
+	const [tplCategoryIds, setTplCategoryIds] = React.useState<number[]>([]);
+	const [editingTplId, setEditingTplId] = React.useState<number | null>(null);
 
 	const [moderationWords, setModerationWords] = React.useState<
 		Array<{ id: number; word: string; enabled: number; created_at: string }>
@@ -96,19 +119,21 @@ export function AdminPage() {
 		setLoading(true);
 		setError('');
 		try {
-			const [s, u, c, settings, words] = await Promise.all([
+			const [s, u, c, settings, words, templates] = await Promise.all([
 				apiFetch<{ users: number; posts: number; comments: number }>('/admin/stats', { headers: getSecurityHeaders('GET') }),
 				apiFetch<any[]>('/admin/users', { headers: getSecurityHeaders('GET') }),
 				apiFetch<Category[]>('/categories'),
 				apiFetch<any>('/admin/settings', { headers: getSecurityHeaders('GET') }),
 				apiFetch<Array<{ id: number; word: string; enabled: number; created_at: string }>>('/admin/moderation-words', {
 					headers: getSecurityHeaders('GET')
-				})
+				}),
+				apiFetch<PostTemplate[]>('/admin/post-templates', { headers: getSecurityHeaders('GET') })
 			]);
 			setStats(s);
 			setUsers(u as any);
 			setCategories(c);
 			setModerationWords(Array.isArray(words) ? words : []);
+			setPostTemplates(Array.isArray(templates) ? templates : []);
 			let friendLinks: Array<{ label: string; url: string }> = [
 				{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }
 			];
@@ -168,7 +193,8 @@ export function AdminPage() {
 				friend_links: friendLinks.length
 					? friendLinks
 					: [{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }],
-				allowed_link_hosts_text: allowedHostsText || 'aridjaya.eu.org'
+				allowed_link_hosts_text: allowedHostsText || 'aridjaya.eu.org',
+				ops_playbook: String(settings.ops_playbook || '')
 			});
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -260,7 +286,9 @@ export function AdminPage() {
 					admin_only: newCategoryAdminOnly,
 					show_on_site: newCategoryShowOnSite,
 					show_on_forum: newCategoryShowOnForum,
-					subtitle: newCategoryShowOnSite ? newCategorySubtitle : ''
+					subtitle: newCategoryShowOnSite ? newCategorySubtitle : '',
+					status_options: textToStatusOptions(newCategoryStatusOptionsText),
+					author_can_set_status: newCategoryAuthorCanSetStatus
 				})
 			});
 			setNewCategoryName('');
@@ -268,6 +296,8 @@ export function AdminPage() {
 			setNewCategoryShowOnSite(false);
 			setNewCategoryShowOnForum(true);
 			setNewCategorySubtitle('');
+			setNewCategoryStatusOptionsText('');
+			setNewCategoryAuthorCanSetStatus(false);
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -290,7 +320,9 @@ export function AdminPage() {
 					admin_only: editingCategoryAdminOnly,
 					show_on_site: editingCategoryShowOnSite,
 					show_on_forum: editingCategoryShowOnForum,
-					subtitle: editingCategoryShowOnSite ? editingCategorySubtitle : ''
+					subtitle: editingCategoryShowOnSite ? editingCategorySubtitle : '',
+					status_options: textToStatusOptions(editingCategoryStatusOptionsText),
+					author_can_set_status: editingCategoryAuthorCanSetStatus
 				})
 			});
 			setEditingCategoryId(null);
@@ -299,6 +331,8 @@ export function AdminPage() {
 			setEditingCategoryShowOnSite(false);
 			setEditingCategoryShowOnForum(true);
 			setEditingCategorySubtitle('');
+			setEditingCategoryStatusOptionsText('');
+			setEditingCategoryAuthorCanSetStatus(false);
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -313,6 +347,62 @@ export function AdminPage() {
 		setError('');
 		try {
 			await apiFetch(`/admin/categories/${id}`, { method: 'DELETE', headers: getSecurityHeaders('DELETE') });
+			await refresh();
+		} catch (e: any) {
+			setError(String(e?.message || e));
+		} finally {
+			setLoading(false);
+		}
+	}
+
+	function toggleTplCategory(id: number) {
+		setTplCategoryIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+	}
+
+	async function savePostTemplate() {
+		if (!isAdmin) return;
+		const name = tplName.trim();
+		if (!name) return;
+		setLoading(true);
+		setError('');
+		try {
+			if (editingTplId) {
+				await apiFetch(`/admin/post-templates/${editingTplId}`, {
+					method: 'PUT',
+					headers: getSecurityHeaders('PUT'),
+					body: JSON.stringify({ name, body: tplBody, category_ids: tplCategoryIds })
+				});
+			} else {
+				await apiFetch('/admin/post-templates', {
+					method: 'POST',
+					headers: getSecurityHeaders('POST'),
+					body: JSON.stringify({ name, body: tplBody, category_ids: tplCategoryIds })
+				});
+			}
+			setTplName('');
+			setTplBody('');
+			setTplCategoryIds([]);
+			setEditingTplId(null);
+			await refresh();
+		} catch (e: any) {
+			setError(String(e?.message || e));
+		} finally {
+			setLoading(false);
+		}
+	}
+
+	async function deletePostTemplate(id: number) {
+		if (!confirm('确定删除该发帖模板？')) return;
+		setLoading(true);
+		setError('');
+		try {
+			await apiFetch(`/admin/post-templates/${id}`, { method: 'DELETE', headers: getSecurityHeaders('DELETE') });
+			if (editingTplId === id) {
+				setEditingTplId(null);
+				setTplName('');
+				setTplBody('');
+				setTplCategoryIds([]);
+			}
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -733,6 +823,17 @@ export function AdminPage() {
 										普通用户外链仅允许这些域名及其子域；管理员发布不受限。默认 aridjaya.eu.org。
 									</p>
 								</div>
+								<div className="space-y-2">
+									<Label htmlFor="ops-playbook">运营备忘（可随时补充）</Label>
+									<Textarea
+										id="ops-playbook"
+										rows={12}
+										value={systemSettings.ops_playbook}
+										onChange={(e) => setSystemSettings((s) => ({ ...s, ops_playbook: e.target.value }))}
+										placeholder="研发日志节奏、FAQ、征集活动、版块用法…"
+									/>
+									<p className="text-xs text-muted-foreground">给管理员自己看的运营提示，不会展示给普通用户。</p>
+								</div>
 								<Button onClick={saveSettings} disabled={loading}>
 									{loading ? '保存中...' : '保存设置'}
 								</Button>
@@ -835,6 +936,27 @@ export function AdminPage() {
 											/>
 										</div>
 									) : null}
+									<div className="grid max-w-2xl gap-3 sm:grid-cols-2">
+										<div className="space-y-2">
+											<Label htmlFor="cat-status-options">帖子状态（一行一个，空=不启用）</Label>
+											<Textarea
+												id="cat-status-options"
+												rows={4}
+												value={newCategoryStatusOptionsText}
+												onChange={(e) => setNewCategoryStatusOptionsText(e.target.value)}
+												placeholder={'待处理\n处理中\n已解决'}
+											/>
+										</div>
+										<label className="flex items-start gap-2 self-end pb-2 text-sm">
+											<input
+												type="checkbox"
+												className="mt-0.5 h-4 w-4"
+												checked={newCategoryAuthorCanSetStatus}
+												onChange={(e) => setNewCategoryAuthorCanSetStatus(e.target.checked)}
+											/>
+											<span>作者可修改状态（如问答「已解决」）</span>
+										</label>
+									</div>
 								</div>
 								<div className="space-y-2">
 									{[...categories]
@@ -890,6 +1012,26 @@ export function AdminPage() {
 															/>
 														</div>
 													) : null}
+													<div className="grid max-w-2xl gap-3 sm:grid-cols-2">
+														<div className="space-y-1">
+															<Label>帖子状态（一行一个，空=不启用）</Label>
+															<Textarea
+																rows={4}
+																value={editingCategoryStatusOptionsText}
+																onChange={(e) => setEditingCategoryStatusOptionsText(e.target.value)}
+																placeholder={'待处理\n处理中\n已解决'}
+															/>
+														</div>
+														<label className="flex items-start gap-2 self-end pb-2 text-sm">
+															<input
+																type="checkbox"
+																className="mt-0.5 h-4 w-4"
+																checked={editingCategoryAuthorCanSetStatus}
+																onChange={(e) => setEditingCategoryAuthorCanSetStatus(e.target.checked)}
+															/>
+															<span>作者可修改状态</span>
+														</label>
+													</div>
 												</div>
 											) : (
 												<span>
@@ -908,6 +1050,12 @@ export function AdminPage() {
 													) : null}
 													{c.show_on_forum === false || c.show_on_forum === 0 ? (
 														<span className="ml-2 text-xs text-amber-700 dark:text-amber-300">社区隐藏</span>
+													) : null}
+													{Array.isArray(c.status_options) && c.status_options.length ? (
+														<span className="ml-2 text-xs text-emerald-700 dark:text-emerald-300">
+															状态 {c.status_options.length} 项
+															{c.author_can_set_status ? ' · 作者可改' : ''}
+														</span>
 													) : null}
 												</span>
 											)}
@@ -928,6 +1076,8 @@ export function AdminPage() {
 																setEditingCategoryShowOnSite(false);
 																setEditingCategoryShowOnForum(true);
 																setEditingCategorySubtitle('');
+																setEditingCategoryStatusOptionsText('');
+																setEditingCategoryAuthorCanSetStatus(false);
 															}}
 														>
 															取消
@@ -965,6 +1115,8 @@ export function AdminPage() {
 																setEditingCategoryShowOnSite(!!c.show_on_site);
 																setEditingCategoryShowOnForum(!(c.show_on_forum === false || c.show_on_forum === 0));
 																setEditingCategorySubtitle(String(c.subtitle || ''));
+																setEditingCategoryStatusOptionsText(statusOptionsToText(c.status_options));
+																setEditingCategoryAuthorCanSetStatus(!!c.author_can_set_status);
 															}}
 														>
 															编辑
@@ -979,6 +1131,96 @@ export function AdminPage() {
 									))}
 									{categories.length === 0 ? <div className="text-sm text-muted-foreground">暂无分类</div> : null}
 								</div>
+							</CardContent>
+						</Card>
+
+						<Card>
+							<CardHeader>
+								<CardTitle>发帖模板</CardTitle>
+							</CardHeader>
+							<CardContent className="space-y-4">
+								<p className="text-sm text-muted-foreground">
+									一个模板可绑定多个分类；用户发帖选中分类后可一键插入。
+								</p>
+								<div className="space-y-2">
+									<Label htmlFor="tpl-name">模板名称</Label>
+									<Input id="tpl-name" value={tplName} onChange={(e) => setTplName(e.target.value)} maxLength={40} />
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="tpl-body">模板正文（Markdown）</Label>
+									<Textarea id="tpl-body" rows={6} value={tplBody} onChange={(e) => setTplBody(e.target.value)} />
+								</div>
+								<div className="space-y-2">
+									<Label>绑定分类（可多选）</Label>
+									<div className="flex flex-wrap gap-3">
+										{categories.map((c) => (
+											<label key={c.id} className="flex items-center gap-2 text-sm">
+												<input
+													type="checkbox"
+													className="h-4 w-4"
+													checked={tplCategoryIds.includes(c.id)}
+													onChange={() => toggleTplCategory(c.id)}
+												/>
+												{c.name}
+											</label>
+										))}
+									</div>
+								</div>
+								<div className="flex flex-wrap gap-2">
+									<Button type="button" onClick={() => void savePostTemplate()} disabled={loading || !tplName.trim()}>
+										{editingTplId ? '保存模板' : '添加模板'}
+									</Button>
+									{editingTplId ? (
+										<Button
+											type="button"
+											variant="outline"
+											onClick={() => {
+												setEditingTplId(null);
+												setTplName('');
+												setTplBody('');
+												setTplCategoryIds([]);
+											}}
+										>
+											取消编辑
+										</Button>
+									) : null}
+								</div>
+								{postTemplates.length ? (
+									<ul className="divide-y rounded-md border">
+										{postTemplates.map((t) => (
+											<li key={t.id} className="flex flex-wrap items-start justify-between gap-3 px-3 py-2 text-sm">
+												<div className="min-w-0 space-y-1">
+													<div className="font-medium">{t.name}</div>
+													<div className="text-xs text-muted-foreground">
+														{(t.category_ids || [])
+															.map((id) => categories.find((c) => c.id === id)?.name || `#${id}`)
+															.join('、') || '未绑定分类'}
+													</div>
+												</div>
+												<div className="flex gap-2">
+													<Button
+														type="button"
+														variant="outline"
+														size="sm"
+														onClick={() => {
+															setEditingTplId(t.id);
+															setTplName(t.name);
+															setTplBody(t.body || '');
+															setTplCategoryIds(Array.isArray(t.category_ids) ? t.category_ids : []);
+														}}
+													>
+														编辑
+													</Button>
+													<Button type="button" variant="destructive" size="sm" onClick={() => void deletePostTemplate(t.id)}>
+														删除
+													</Button>
+												</div>
+											</li>
+										))}
+									</ul>
+								) : (
+									<p className="text-sm text-muted-foreground">暂无模板。</p>
+								)}
 							</CardContent>
 						</Card>
 

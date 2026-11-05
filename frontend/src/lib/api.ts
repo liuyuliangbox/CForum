@@ -19,6 +19,10 @@ export type Category = {
 	show_on_forum?: number | boolean;
 	/** 官网导航与社区分类共用排序，越小越靠前 */
 	sort_order?: number;
+	/** 分类自定状态列表；空数组 = 不启用状态 */
+	status_options?: string[];
+	/** 作者是否可修改自己帖子的状态 */
+	author_can_set_status?: number | boolean;
 	created_at: string;
 };
 
@@ -36,6 +40,10 @@ export type Post = {
 	author_publish_until?: string | null;
 	/** 1=官网精选（仅 admin）；精选后作者不可隐藏/删除 */
 	site_featured?: number;
+	/** 帖子状态（须属于所属分类 status_options） */
+	status?: string | null;
+	category_status_options?: string[];
+	category_author_can_set_status?: number | boolean;
 	view_count?: number;
 	created_at: string;
 	author_name?: string;
@@ -44,6 +52,15 @@ export type Post = {
 	like_count?: number;
 	comment_count?: number;
 	liked?: boolean;
+};
+
+export type PostTemplate = {
+	id: number;
+	name: string;
+	body: string;
+	sort_order?: number;
+	category_ids?: number[];
+	created_at?: string;
 };
 
 export type Comment = {
