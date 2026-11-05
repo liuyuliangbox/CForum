@@ -6,10 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useConfig } from '@/hooks/use-config';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import { getSecurityHeaders } from '@/lib/api';
 
 export function ForgotPage() {
 	const { config } = useConfig();
+	useDocumentTitle('忘记密码');
 	const enabled = !!config?.turnstile_enabled;
 	const siteKey = config?.turnstile_site_key || '';
 	const turnstileActive = enabled && !!siteKey;

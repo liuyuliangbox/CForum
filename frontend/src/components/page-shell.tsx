@@ -1,17 +1,22 @@
 import * as React from 'react';
 
 import { SiteHeader } from '@/components/site-header';
-import { getUser, type User } from '@/lib/auth';
 import { useConfig } from '@/hooks/use-config';
+import { useDocumentTitle } from '@/hooks/use-document-title';
+import { getUser, type User } from '@/lib/auth';
 
 export function PageShell({
-	children
+	children,
+	title
 }: {
 	children: React.ReactNode;
+	/** Optional page label; browser title becomes「label - 社区标题」 */
+	title?: string | null;
 }) {
 	const [user, setUser] = React.useState<User | null>(() => getUser());
 	const { config } = useConfig();
 	const [generatedSecret, setGeneratedSecret] = React.useState<string>('');
+	useDocumentTitle(title);
 
 	// if jwt not configured, generate a base64-secret for display
 	React.useEffect(() => {

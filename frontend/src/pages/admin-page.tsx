@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { apiFetch, getSecurityHeaders, type Category } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
+import { DEFAULT_SITE_TAGLINE, DEFAULT_SITE_TITLE } from '@/lib/site';
 
 export function AdminPage() {
 	const token = getToken();
@@ -29,8 +30,8 @@ export function AdminPage() {
 		notify_on_username_change: false,
 		notify_on_avatar_change: false,
 		notify_on_manual_verify: false,
-		site_title: 'liuyuliangbox / Project Turn',
-		site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
+		site_title: DEFAULT_SITE_TITLE,
+		site_tagline: DEFAULT_SITE_TAGLINE,
 		site_brand: 'liuyuliangbox',
 		project_codename: 'Project Turn',
 		working_title_note: '正式名称待定 / Working Title',
@@ -110,8 +111,8 @@ export function AdminPage() {
 				notify_on_username_change: !!settings.notify_on_username_change,
 				notify_on_avatar_change: !!settings.notify_on_avatar_change,
 				notify_on_manual_verify: !!settings.notify_on_manual_verify,
-				site_title: settings.site_title || 'liuyuliangbox / Project Turn',
-				site_tagline: settings.site_tagline || '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
+				site_title: settings.site_title || DEFAULT_SITE_TITLE,
+				site_tagline: settings.site_tagline || DEFAULT_SITE_TAGLINE,
 				site_brand: settings.site_brand || 'liuyuliangbox',
 				project_codename: settings.project_codename || 'Project Turn',
 				working_title_note: settings.working_title_note || '正式名称待定 / Working Title',
@@ -352,7 +353,7 @@ export function AdminPage() {
 	}
 
 	return (
-		<PageShell>
+		<PageShell title="管理后台">
 			<div className="space-y-6">
 				<div className="flex items-center justify-between">
 					<div>

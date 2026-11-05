@@ -20,6 +20,7 @@ import {
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
+import { resolveSiteTagline, resolveSiteTitle } from '@/lib/site';
 import { cn } from '@/lib/utils';
 import { validateText } from '@/lib/validators';
 
@@ -647,10 +648,10 @@ export function IndexPage() {
 					<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 						<div>
 							<h1 className="text-2xl font-semibold tracking-tight">
-								{config?.site_title || 'liuyuliangbox / Project Turn'}
+								{resolveSiteTitle(config)}
 							</h1>
 							<p className="text-sm text-muted-foreground">
-								{config?.site_tagline || '由 Cloudflare Workers、Pages、D1、R2 提供服务。'}
+								{resolveSiteTagline(config)}
 							</p>
 						</div>
 						<div className="flex flex-wrap items-center gap-2">

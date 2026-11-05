@@ -6,11 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useConfig } from '@/hooks/use-config';
+import { useDocumentTitle } from '@/hooks/use-document-title';
 import { getSecurityHeaders } from '@/lib/api';
 import { setToken, setUser } from '@/lib/auth';
 
 export function LoginPage() {
 	const { config } = useConfig();
+	useDocumentTitle('登录');
 	const [email, setEmail] = React.useState('');
 	const [password, setPassword] = React.useState('');
 	const [totpCode, setTotpCode] = React.useState('');

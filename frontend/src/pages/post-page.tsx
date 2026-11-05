@@ -430,7 +430,7 @@ export function PostPage() {
 	}
 
 	return (
-		<PageShell>
+		<PageShell title={post?.title || '帖子'}>
 			<div className="space-y-6">
 				<div className="flex items-center justify-between">
 					<Button asChild variant="ghost" size="sm">
