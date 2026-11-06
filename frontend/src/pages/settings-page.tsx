@@ -242,7 +242,7 @@ export function SettingsPage() {
 						<div className="space-y-2">
 							<Label htmlFor="profile-username">用户名</Label>
 							<Input id="profile-username" value={username} onChange={(e) => setUsername(e.target.value)} maxLength={20} />
-							<p className="text-xs text-muted-foreground">修改用户名会走内容审查（敏感词等）。</p>
+							<p className="text-xs text-muted-foreground">用户名请勿填写违规内容。</p>
 						</div>
 
 						{isAdmin ? (
