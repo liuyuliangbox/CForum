@@ -859,7 +859,9 @@ export function PostPage() {
 								</CardTitle>
 							</CardHeader>
 							<CardContent className="space-y-4">
-								<div className="flex flex-wrap items-center gap-2">
+								<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+									{/* 手机：右对齐且从右到左为 点赞→评论→观看；桌面：保持 点赞→评论→观看 左起 */}
+									<div className="flex w-full flex-row-reverse flex-wrap items-center justify-start gap-2 sm:w-auto sm:flex-row">
 									<Button variant={post.liked ? 'secondary' : 'outline'} size="sm" onClick={toggleLike} disabled={!user}>
 										<Heart className="h-4 w-4 text-rose-600" fill={post.liked ? 'currentColor' : 'none'} />
 										<span className="tabular-nums">{post.like_count || 0}</span>
@@ -879,10 +881,11 @@ export function PostPage() {
 										<span className="tabular-nums">{post.view_count || 0}</span>
 										<span className="sr-only">观看数</span>
 									</span>
+									</div>
 
 									{(!!post.category_enable_cited_from ||
 										(user && (user.role === 'admin' || user.id === post.author_id))) ? (
-										<div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+										<div className="flex flex-wrap items-center gap-2 sm:ml-auto">
 									{!!post.category_enable_cited_from ? (
 										<Button
 											variant="outline"
@@ -919,7 +922,7 @@ export function PostPage() {
 												<span className="sr-only">更多</span>
 											</Button>
 											{adminMenuOpen ? (
-												<div className="absolute right-0 top-full z-[60] mt-2 max-h-64 w-44 overflow-y-auto rounded-md border bg-background p-1 shadow-lg">
+												<div className="absolute left-0 top-full z-[60] mt-2 max-h-64 w-44 overflow-y-auto rounded-md border bg-background p-1 shadow-lg sm:left-auto sm:right-0">
 													{(user.role === 'admin' ||
 														(Number(post.is_visible ?? 1) === 1 &&
 															Number(post.site_featured ?? 0) !== 1) ||
