@@ -791,18 +791,16 @@ export function PostPage() {
 										</Button>
 									) : null}
 
-									{user &&
-									(user.role === 'admin' ||
-										(user.id === post.author_id && Number(post.is_visible ?? 1) === 0)) ? (
-										<>
-											<Button variant="outline" size="sm" onClick={() => setIsEditing((v) => !v)}>
-												{isEditing ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-												<span className="sr-only">{isEditing ? '取消编辑' : '编辑'}</span>
-											</Button>
-										</>
+									{user && (user.role === 'admin' || user.id === post.author_id) ? (
+										<div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+									{user.role === 'admin' ||
+									(user.id === post.author_id && Number(post.is_visible ?? 1) === 0) ? (
+										<Button variant="outline" size="sm" onClick={() => setIsEditing((v) => !v)}>
+											{isEditing ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+											<span className="sr-only">{isEditing ? '取消编辑' : '编辑'}</span>
+										</Button>
 									) : null}
 
-									{user && (user.role === 'admin' || user.id === post.author_id) ? (
 										<div className="relative z-30" ref={adminMenuRef}>
 											<Button
 												type="button"
@@ -948,6 +946,7 @@ export function PostPage() {
 													) : null}
 												</div>
 											) : null}
+										</div>
 										</div>
 									) : null}
 								</div>

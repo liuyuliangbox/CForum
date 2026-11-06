@@ -661,24 +661,6 @@ export function IndexPage() {
 								<MessageCircle className="h-3.5 w-3.5" />
 								零评论
 							</button>
-							{selectedStatusOptions.length ? (
-								<select
-									className="h-9 rounded-md border bg-background px-3 text-sm"
-									value={statusFilter}
-									onChange={(e) => {
-										setStatusFilter(e.target.value);
-										setPageOffset(0);
-									}}
-									aria-label="按状态筛选"
-								>
-									<option value="">全部状态</option>
-									{selectedStatusOptions.map((s) => (
-										<option key={s} value={s}>
-											{s}
-										</option>
-									))}
-								</select>
-							) : null}
 						</div>
 					</div>
 
@@ -788,6 +770,51 @@ export function IndexPage() {
 										</button>
 									);
 								})}
+							</div>
+						) : null}
+						{selectedCategory && selectedStatusOptions.length ? (
+							<div className="space-y-2 pt-1">
+								<div className="text-xs font-medium text-muted-foreground">按状态筛选</div>
+								<div className="flex flex-wrap gap-2" role="listbox" aria-label="状态筛选">
+									<button
+										type="button"
+										role="option"
+										aria-selected={!statusFilter}
+										className={
+											!statusFilter
+												? 'inline-flex items-center rounded-full border border-foreground bg-foreground px-3 py-1 text-xs font-medium text-background'
+												: 'inline-flex items-center rounded-full border bg-background px-3 py-1 text-xs font-medium text-foreground hover:bg-muted/60'
+										}
+										onClick={() => {
+											setStatusFilter('');
+											setPageOffset(0);
+										}}
+									>
+										全部状态
+									</button>
+									{selectedStatusOptions.map((s) => {
+										const active = statusFilter === s;
+										return (
+											<button
+												key={s}
+												type="button"
+												role="option"
+												aria-selected={active}
+												className={
+													active
+														? 'inline-flex items-center rounded-full border border-sky-600 bg-sky-600 px-3 py-1 text-xs font-medium text-white'
+														: 'inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-medium text-sky-800 hover:bg-sky-500/20 dark:text-sky-200'
+												}
+												onClick={() => {
+													setStatusFilter(s);
+													setPageOffset(0);
+												}}
+											>
+												{s}
+											</button>
+										);
+									})}
+								</div>
 							</div>
 						) : null}
 					</div>
