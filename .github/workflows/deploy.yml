@@ -94,17 +94,9 @@ jobs:
             echo "❌ JWT_SECRET GitHub secret is empty"
             exit 1
           fi
-          for attempt in 1 2 3 4 5; do
-            echo "🔐 Uploading JWT_SECRET (attempt ${attempt}/5)..."
-            if printf '%s' "$JWT_SECRET" | npx wrangler secret put JWT_SECRET --env=""; then
-              echo "✅ JWT_SECRET uploaded"
-              exit 0
-            fi
-            echo "⚠️ secret put failed; waiting before retry..."
-            sleep $((attempt * 15))
-          done
-          echo "❌ Failed to upload JWT_SECRET after retries"
-          exit 1
+          echo "🔐 Uploading JWT_SECRET..."
+          printf '%s' "$JWT_SECRET" | npx wrangler secret put JWT_SECRET --env=""
+          echo "✅ JWT_SECRET uploaded"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

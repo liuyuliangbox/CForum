@@ -190,7 +190,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 21;
+const SCHEMA_VERSION = 22;
 
 const DEFAULT_AVATAR_PRESET_COUNT = 12;
 const DEFAULT_AVATAR_PRESETS = Array.from(
@@ -452,6 +452,7 @@ export default {
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_title', 'liuyuliangbox / Project Turn');`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_tagline', '由 Cloudflare Workers、Pages、D1、R2 提供服务。');`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_post_status_change', '1');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_site_feature', '1');`,
 					`INSERT OR IGNORE INTO users (email, username, password, role, verified, nickname) VALUES 
 ('admin@adysec.com', 'Admin', 'e86f78a8a3caf0b60d8e74e5942aa6d86dc150cd3c03338aef25b7d2d7e3acc7', 'admin', 1, 'System Admin');`
 				];
@@ -713,8 +714,11 @@ export default {
 						`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_post_status_change', '1')`
 					)
 					.run();
+				await env.cforum_db
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_site_feature', '1')`)
+					.run();
 			} catch (e) {
-				console.error('Failed to seed notify_on_post_status_change', e);
+				console.error('Failed to seed notify_on_post_status_change / notify_on_site_feature', e);
 			}
 			try {
 				await env.cforum_db
@@ -1079,7 +1083,8 @@ export default {
 			'notify_on_username_change',
 			'notify_on_avatar_change',
 			'notify_on_manual_verify',
-			'notify_on_post_status_change'
+			'notify_on_post_status_change',
+			'notify_on_site_feature'
 		]);
 		const STRING_SETTING_KEYS = new Set([
 			'site_title',
@@ -1181,6 +1186,7 @@ export default {
 					notify_on_avatar_change: false,
 					notify_on_manual_verify: false,
 					notify_on_post_status_change: true,
+					notify_on_site_feature: true,
 					site_title: 'liuyuliangbox / Project Turn',
 					site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
 					...SITE_META_DEFAULTS
@@ -1274,6 +1280,7 @@ export default {
 					notify_on_avatar_change,
 					notify_on_manual_verify,
 					notify_on_post_status_change,
+					notify_on_site_feature,
 					site_title,
 					site_tagline,
 					site_brand,
@@ -1299,6 +1306,9 @@ export default {
 				if (notify_on_manual_verify !== undefined) batch.push(stmt.bind('notify_on_manual_verify', notify_on_manual_verify ? '1' : '0'));
 				if (notify_on_post_status_change !== undefined) {
 					batch.push(stmt.bind('notify_on_post_status_change', notify_on_post_status_change ? '1' : '0'));
+				}
+				if (notify_on_site_feature !== undefined) {
+					batch.push(stmt.bind('notify_on_site_feature', notify_on_site_feature ? '1' : '0'));
 				}
 				if (site_title !== undefined) batch.push(stmt.bind('site_title', String(site_title).slice(0, 80)));
 				if (site_tagline !== undefined) batch.push(stmt.bind('site_tagline', String(site_tagline).slice(0, 160)));
@@ -3723,8 +3733,30 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
 				const body = (await request.json()) as any;
 				const featured = !(body?.featured === false || body?.featured === 0);
-				const post = await env.cforum_db.prepare('SELECT id FROM posts WHERE id = ?').bind(postId).first();
+				const post = await env.cforum_db
+					.prepare(
+						`SELECT posts.id, posts.title, posts.author_id,
+							IFNULL(posts.site_featured, 0) AS site_featured,
+							users.email AS author_email,
+							IFNULL(users.email_notifications, 1) AS author_email_notifications
+						 FROM posts
+						 LEFT JOIN users ON posts.author_id = users.id
+						 WHERE posts.id = ?`
+					)
+					.bind(postId)
+					.first<{
+						id: number;
+						title: string;
+						author_id: number;
+						site_featured: number;
+						author_email: string | null;
+						author_email_notifications: number;
+					}>();
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
+				const prevFeatured = Number(post.site_featured) === 1;
+				if (prevFeatured === featured) {
+					return jsonResponse({ success: true, site_featured: featured ? 1 : 0 });
+				}
 				await env.cforum_db
 					.prepare('UPDATE posts SET site_featured = ? WHERE id = ?')
 					.bind(featured ? 1 : 0, postId)
@@ -3737,6 +3769,34 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					{ featured },
 					request
 				);
+
+				const isAuthor = post.author_id === userPayload.id;
+				if (!isAuthor && post.author_email && Number(post.author_email_notifications) === 1) {
+					const notifyRow = await env.cforum_db
+						.prepare("SELECT value FROM settings WHERE key = 'notify_on_site_feature'")
+						.first<DBSetting>();
+					const notifyEnabled = !notifyRow || notifyRow.value === '1';
+					if (notifyEnabled) {
+						const postUrl = `${getBaseUrl()}/post?id=${post.id}`;
+						const safeTitle = String(post.title || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+						const emailHtml = featured
+							? `
+								<h1>帖子已设为官网精选</h1>
+								<p>您的帖子 <strong>${safeTitle}</strong> 已被选入官网精选。</p>
+								<p><a href="${postUrl}">查看帖子</a></p>
+							`
+							: `
+								<h1>帖子已取消官网精选</h1>
+								<p>您的帖子 <strong>${safeTitle}</strong> 已取消官网精选。</p>
+								<p><a href="${postUrl}">查看帖子</a></p>
+							`;
+						const subject = featured
+							? `您的帖子已设为官网精选：${String(post.title || '').slice(0, 40)}`
+							: `您的帖子已取消官网精选：${String(post.title || '').slice(0, 40)}`;
+						ctx.waitUntil(sendEmail(post.author_email, subject, emailHtml, env).catch(console.error));
+					}
+				}
+
 				return jsonResponse({ success: true, site_featured: featured ? 1 : 0 });
 			} catch (e) {
 				return handleError(e);
@@ -4009,12 +4069,35 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const body = (await request.json()) as any;
 				const featured = !(body?.featured === false || body?.featured === 0);
 				const comment = await env.cforum_db
-					.prepare('SELECT id, parent_id FROM comments WHERE id = ?')
+					.prepare(
+						`SELECT comments.id, comments.parent_id, comments.author_id, comments.post_id,
+							IFNULL(comments.is_featured, 0) AS is_featured,
+							posts.title AS post_title,
+							users.email AS author_email,
+							IFNULL(users.email_notifications, 1) AS author_email_notifications
+						 FROM comments
+						 LEFT JOIN posts ON comments.post_id = posts.id
+						 LEFT JOIN users ON comments.author_id = users.id
+						 WHERE comments.id = ?`
+					)
 					.bind(id)
-					.first<{ id: number; parent_id: number | null }>();
+					.first<{
+						id: number;
+						parent_id: number | null;
+						author_id: number;
+						post_id: number;
+						is_featured: number;
+						post_title: string | null;
+						author_email: string | null;
+						author_email_notifications: number;
+					}>();
 				if (!comment) return jsonResponse({ error: 'Comment not found' }, 404);
 				if (comment.parent_id != null) {
 					return jsonResponse({ error: '仅一级评论可精选' }, 400);
+				}
+				const prevFeatured = Number(comment.is_featured) === 1;
+				if (prevFeatured === featured) {
+					return jsonResponse({ success: true, is_featured: featured ? 1 : 0 });
 				}
 				await env.cforum_db
 					.prepare('UPDATE comments SET is_featured = ? WHERE id = ?')
@@ -4028,6 +4111,36 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					{ featured },
 					request
 				);
+
+				const isAuthor = comment.author_id === userPayload.id;
+				if (!isAuthor && comment.author_email && Number(comment.author_email_notifications) === 1) {
+					const notifyRow = await env.cforum_db
+						.prepare("SELECT value FROM settings WHERE key = 'notify_on_site_feature'")
+						.first<DBSetting>();
+					const notifyEnabled = !notifyRow || notifyRow.value === '1';
+					if (notifyEnabled) {
+						const postUrl = `${getBaseUrl()}/post?id=${comment.post_id}`;
+						const safeTitle = String(comment.post_title || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+						const emailHtml = featured
+							? `
+								<h1>评论已设为官网精选</h1>
+								<p>您在帖子 <strong>${safeTitle}</strong> 下的评论已被选入官网精选。</p>
+								<p><a href="${postUrl}">查看帖子</a></p>
+							`
+							: `
+								<h1>评论已取消官网精选</h1>
+								<p>您在帖子 <strong>${safeTitle}</strong> 下的评论已取消官网精选。</p>
+								<p><a href="${postUrl}">查看帖子</a></p>
+							`;
+						const subject = featured
+							? `您的评论已设为官网精选：${String(comment.post_title || '').slice(0, 40)}`
+							: `您的评论已取消官网精选：${String(comment.post_title || '').slice(0, 40)}`;
+						ctx.waitUntil(
+							sendEmail(comment.author_email, subject, emailHtml, env).catch(console.error)
+						);
+					}
+				}
+
 				return jsonResponse({ success: true, is_featured: featured ? 1 : 0 });
 			} catch (e) {
 				return handleError(e);
