@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowDown, ArrowUp, RefreshCw, Shield, User as UserIcon } from 'lucide-react';
+import { ArrowDown, ArrowUp, Eye, Pencil, RefreshCw, Shield, User as UserIcon } from 'lucide-react';
 
 import { PageShell } from '@/components/page-shell';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { invalidateConfigCache } from '@/hooks/use-config';
 import { apiFetch, getSecurityHeaders, type Category, type PostTemplate } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
+import { renderMarkdownToHtml } from '@/lib/markdown';
 import { DEFAULT_SITE_TAGLINE, DEFAULT_SITE_TITLE } from '@/lib/site';
 
 function statusOptionsToText(options?: string[] | null): string {
@@ -97,6 +98,8 @@ export function AdminPage() {
 	const [tplBody, setTplBody] = React.useState('');
 	const [tplCategoryIds, setTplCategoryIds] = React.useState<number[]>([]);
 	const [editingTplId, setEditingTplId] = React.useState<number | null>(null);
+	const [opsPlaybookEditing, setOpsPlaybookEditing] = React.useState(false);
+	const opsPlaybookPreviewRef = React.useRef<HTMLDivElement | null>(null);
 
 	const [moderationWords, setModerationWords] = React.useState<
 		Array<{ id: number; word: string; enabled: number; created_at: string }>
@@ -842,15 +845,54 @@ export function AdminPage() {
 									</p>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="ops-playbook">运营备忘（可随时补充）</Label>
-									<Textarea
-										id="ops-playbook"
-										rows={12}
-										value={systemSettings.ops_playbook}
-										onChange={(e) => setSystemSettings((s) => ({ ...s, ops_playbook: e.target.value }))}
-										placeholder="研发日志节奏、FAQ、征集活动、版块用法…"
-									/>
-									<p className="text-xs text-muted-foreground">给管理员自己看的运营提示，不会展示给普通用户。</p>
+									<div className="flex flex-wrap items-center justify-between gap-2">
+										<Label htmlFor="ops-playbook">运营备忘 / 设置说明（Markdown）</Label>
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											onClick={() => setOpsPlaybookEditing((v) => !v)}
+										>
+											{opsPlaybookEditing ? (
+												<>
+													<Eye className="h-4 w-4" />
+													预览
+												</>
+											) : (
+												<>
+													<Pencil className="h-4 w-4" />
+													编辑
+												</>
+											)}
+										</Button>
+									</div>
+									{opsPlaybookEditing ? (
+										<Textarea
+											id="ops-playbook"
+											rows={18}
+											value={systemSettings.ops_playbook}
+											onChange={(e) => setSystemSettings((s) => ({ ...s, ops_playbook: e.target.value }))}
+											placeholder="分类开关、引用/关联、活动节奏…"
+											className="font-mono text-sm"
+										/>
+									) : (
+										<div className="max-h-[32rem] overflow-y-auto rounded-md border bg-muted/20 p-4">
+											{systemSettings.ops_playbook.trim() ? (
+												<div
+													ref={opsPlaybookPreviewRef}
+													className="prose max-w-none break-words text-sm [&_table]:w-full [&_th]:border [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6"
+													dangerouslySetInnerHTML={{
+														__html: renderMarkdownToHtml(systemSettings.ops_playbook)
+													}}
+												/>
+											) : (
+												<p className="text-sm text-muted-foreground">暂无内容，点「编辑」补充运营说明。</p>
+											)}
+										</div>
+									)}
+									<p className="text-xs text-muted-foreground">
+										默认预览便于阅读；改完后点上方「保存设置」。仅管理员可见，不会展示给普通用户。
+									</p>
 								</div>
 								<Button onClick={saveSettings} disabled={loading}>
 									{loading ? '保存中...' : '保存设置'}

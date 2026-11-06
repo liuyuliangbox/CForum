@@ -21,6 +21,7 @@ import {
 } from './rate-limit';
 import {
 	DEFAULT_OPS_PLAYBOOK,
+	LEGACY_OPS_PLAYBOOK,
 	defaultStatusForOptions,
 	isValidStatusForOptions,
 	parseStatusOptions,
@@ -187,7 +188,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -644,6 +645,10 @@ export default {
 				await env.cforum_db
 					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('ops_playbook', ?)`)
 					.bind(DEFAULT_OPS_PLAYBOOK)
+					.run();
+				await env.cforum_db
+					.prepare(`UPDATE settings SET value = ? WHERE key = 'ops_playbook' AND value = ?`)
+					.bind(DEFAULT_OPS_PLAYBOOK, LEGACY_OPS_PLAYBOOK)
 					.run();
 			} catch (e) {
 				console.error('Failed to seed ops_playbook', e);
