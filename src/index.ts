@@ -1378,7 +1378,9 @@ export default {
 				const type = String(formData.get('type') || 'post');
 
 				if (type === 'avatar') {
-					return jsonResponse({ error: '不支持上传头像，请选择预设头像' }, 400);
+					if (user.role !== 'admin') {
+						return jsonResponse({ error: '不支持上传头像，请选择预设头像' }, 400);
+					}
 				}
 
 				if (!file || !(file instanceof File)) {
@@ -1394,7 +1396,8 @@ export default {
 					return jsonResponse({ error: 'File size too large (Max 2MB)' }, 400);
 				}
 
-				if (user.role !== 'admin') {
+				const uploadType = type === 'avatar' && user.role === 'admin' ? 'avatar' : 'post';
+				if (uploadType === 'post' && user.role !== 'admin') {
 					const row = await env.cforum_db
 						.prepare('SELECT created_at FROM users WHERE id = ?')
 						.bind(user.id)
@@ -1410,7 +1413,13 @@ export default {
 					}
 				}
 
-				const imageKey = await uploadImage(env as unknown as S3Env, file, userId, postId.toString(), 'post');
+				const imageKey = await uploadImage(
+					env as unknown as S3Env,
+					file,
+					userId,
+					postId.toString(),
+					uploadType as 'post' | 'avatar'
+				);
 				const publicBase = (env as any).BUCKET ? `${getBaseUrl()}/r2` : undefined;
 				const imageUrl = getPublicUrl(env as unknown as S3Env, imageKey, publicBase);
 				return jsonResponse({ success: true, url: imageUrl });
@@ -1539,23 +1548,39 @@ export default {
 					newUsername = username;
 				}
 
+				const isAdmin = userPayload.role === 'admin';
 				let newAvatarUrl = currentUser.avatar_url;
 				if (avatar_url !== undefined) {
 					try {
 						if (avatar_url === '' || avatar_url === null) {
 							newAvatarUrl = await createDefaultAvatarUrl(user_id);
+						} else if (isAdmin && typeof avatar_url === 'string' && avatar_url.startsWith('data:image/')) {
+							newAvatarUrl = await normalizeAvatarUrl(user_id, avatar_url, { allowUpload: true });
 						} else if (currentUser.avatar_url && avatar_url === currentUser.avatar_url) {
-							newAvatarUrl = String(currentUser.avatar_url).startsWith('data:image/')
-								? await createDefaultAvatarUrl(user_id)
-								: currentUser.avatar_url;
+							if (String(currentUser.avatar_url).startsWith('data:image/')) {
+								newAvatarUrl = isAdmin
+									? await normalizeAvatarUrl(user_id, String(currentUser.avatar_url), { allowUpload: true })
+									: await createDefaultAvatarUrl(user_id);
+							} else {
+								newAvatarUrl = currentUser.avatar_url;
+							}
 						} else {
-							newAvatarUrl = await normalizeAvatarUrl(user_id, String(avatar_url), { presetsOnly: true });
+							newAvatarUrl = await normalizeAvatarUrl(user_id, String(avatar_url), {
+								presetsOnly: !isAdmin,
+								allowUpload: isAdmin
+							});
 						}
 					} catch (avatarErr: any) {
 						return jsonResponse({ error: String(avatarErr?.message || avatarErr) }, 400);
 					}
 				} else if (currentUser.avatar_url && String(currentUser.avatar_url).startsWith('data:image/')) {
-					newAvatarUrl = await createDefaultAvatarUrl(user_id);
+					try {
+						newAvatarUrl = isAdmin
+							? await normalizeAvatarUrl(user_id, String(currentUser.avatar_url), { allowUpload: true })
+							: await createDefaultAvatarUrl(user_id);
+					} catch (avatarErr: any) {
+						return jsonResponse({ error: String(avatarErr?.message || avatarErr) }, 400);
+					}
 				}
 
 				let newEmailNotif = currentUser.email_notifications;

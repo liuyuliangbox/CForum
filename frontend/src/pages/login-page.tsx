@@ -10,9 +10,12 @@ import { useDocumentTitle } from '@/hooks/use-document-title';
 import { getSecurityHeaders } from '@/lib/api';
 import { setToken, setUser } from '@/lib/auth';
 
+type LoginStep = 'credentials' | 'totp';
+
 export function LoginPage() {
 	const { config } = useConfig();
 	useDocumentTitle('登录');
+	const [step, setStep] = React.useState<LoginStep>('credentials');
 	const [email, setEmail] = React.useState('');
 	const [password, setPassword] = React.useState('');
 	const [totpCode, setTotpCode] = React.useState('');
@@ -25,11 +28,20 @@ export function LoginPage() {
 	const siteKey = config?.turnstile_site_key || '';
 	const turnstileActive = enabled && !!siteKey;
 
+	function resetTurnstile() {
+		setTurnstileToken('');
+		setTurnstileResetKey((v) => v + 1);
+	}
+
 	async function handleSubmit(e: React.FormEvent) {
 		e.preventDefault();
 		setError('');
 		if (turnstileActive && !turnstileToken) {
 			setError('请完成验证码验证');
+			return;
+		}
+		if (step === 'totp' && !totpCode.trim()) {
+			setError('请输入 2FA 验证码');
 			return;
 		}
 		setLoading(true);
@@ -40,16 +52,21 @@ export function LoginPage() {
 				body: JSON.stringify({
 					email,
 					password,
-					totp_code: totpCode,
+					...(step === 'totp' ? { totp_code: totpCode.trim() } : {}),
 					'cf-turnstile-response': turnstileToken
 				})
 			});
 			const data = (await res.json()) as any;
 			if (!res.ok) {
-				setTurnstileToken('');
-				setTurnstileResetKey((v) => v + 1);
+				resetTurnstile();
 				if (data?.error === 'TOTP_REQUIRED') {
-					setError('请输入 2FA 验证码');
+					setStep('totp');
+					setTotpCode('');
+					setError('');
+					return;
+				}
+				if (data?.error === 'Invalid TOTP code') {
+					setError('验证码错误，请重试');
 					return;
 				}
 				throw new Error(data?.error || '登录失败');
@@ -65,73 +82,106 @@ export function LoginPage() {
 		}
 	}
 
+	function backToCredentials() {
+		setStep('credentials');
+		setTotpCode('');
+		setError('');
+		resetTurnstile();
+	}
+
 	return (
 		<div className="min-h-dvh bg-muted/20">
 			<main className="mx-auto flex max-w-5xl justify-center px-4 py-10">
 				<Card className="w-full max-w-md">
 					<CardHeader>
-						<CardTitle>登录</CardTitle>
+						<CardTitle>{step === 'totp' ? '两步验证' : '登录'}</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<form className="space-y-4" onSubmit={handleSubmit}>
-							{error ? <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">{error}</div> : null}
+							{error ? (
+								<div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
+									{error}
+								</div>
+							) : null}
 
-							<div className="space-y-2">
-								<Label htmlFor="login-email">邮箱</Label>
-								<Input
-									id="login-email"
-									name="email"
-									type="email"
-									autoComplete="username"
-									value={email}
-									onChange={(e) => setEmail(e.target.value)}
-									required
-								/>
-							</div>
+							{step === 'credentials' ? (
+								<>
+									<div className="space-y-2">
+										<Label htmlFor="login-email">邮箱</Label>
+										<Input
+											id="login-email"
+											name="email"
+											type="email"
+											autoComplete="username"
+											value={email}
+											onChange={(e) => setEmail(e.target.value)}
+											required
+										/>
+									</div>
 
-							<div className="space-y-2">
-								<Label htmlFor="login-password">密码</Label>
-								<Input
-									id="login-password"
-									name="password"
-									type="password"
-									autoComplete="current-password"
-									value={password}
-									onChange={(e) => setPassword(e.target.value)}
-									required
-								/>
-							</div>
+									<div className="space-y-2">
+										<Label htmlFor="login-password">密码</Label>
+										<Input
+											id="login-password"
+											name="password"
+											type="password"
+											autoComplete="current-password"
+											value={password}
+											onChange={(e) => setPassword(e.target.value)}
+											required
+										/>
+									</div>
+								</>
+							) : (
+								<>
+									<p className="text-sm text-muted-foreground">
+										账号 <span className="font-medium text-foreground">{email}</span> 已开启两步验证，请输入验证器中的 6 位验证码。
+									</p>
+									<div className="space-y-2">
+										<Label htmlFor="login-totp">验证码</Label>
+										<Input
+											id="login-totp"
+											name="totp_code"
+											type="text"
+											inputMode="numeric"
+											pattern="\d*"
+											maxLength={6}
+											placeholder="000000"
+											autoComplete="one-time-code"
+											autoFocus
+											value={totpCode}
+											onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+											required
+										/>
+									</div>
+								</>
+							)}
 
-							<div className="space-y-2">
-								<Label htmlFor="login-totp">双重验证码 (若开启)</Label>
-								<Input
-									id="login-totp"
-									name="totp_code"
-									type="text"
-									inputMode="numeric"
-									pattern="\d*"
-									maxLength={6}
-									placeholder="选填"
-									autoComplete="one-time-code"
-									value={totpCode}
-									onChange={(e) => setTotpCode(e.target.value)}
-								/>
-							</div>
-
-<TurnstileWidget enabled={turnstileActive} siteKey={siteKey} onToken={setTurnstileToken} resetKey={turnstileResetKey} />
+							<TurnstileWidget
+								enabled={turnstileActive}
+								siteKey={siteKey}
+								onToken={setTurnstileToken}
+								resetKey={turnstileResetKey}
+							/>
 
 							<Button className="w-full" type="submit" disabled={loading}>
-								{loading ? '处理中...' : '登录'}
+								{loading ? '处理中...' : step === 'totp' ? '验证并登录' : '登录'}
 							</Button>
 
-							<div className="flex justify-between text-sm">
-								<a className="text-muted-foreground hover:underline" href="/register">
-									没有账号？注册
-								</a>
-								<a className="text-muted-foreground hover:underline" href="/forgot">
-									忘记密码？
-								</a>
-							</div>
+							{step === 'totp' ? (
+								<Button type="button" variant="ghost" className="w-full" onClick={backToCredentials} disabled={loading}>
+									返回上一步
+								</Button>
+							) : (
+								<div className="flex justify-between text-sm">
+									<a className="text-muted-foreground hover:underline" href="/register">
+										没有账号？注册
+									</a>
+									<a className="text-muted-foreground hover:underline" href="/forgot">
+										忘记密码？
+									</a>
+								</div>
+							)}
 						</form>
 					</CardContent>
 				</Card>

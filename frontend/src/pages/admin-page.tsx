@@ -1556,7 +1556,7 @@ export function AdminPage() {
 										<Input id="edit-email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} type="email" />
 									</div>
 									<div className="grid gap-2">
-										<Label htmlFor="edit-avatar">头像 URL（管理员可填预设或外链）</Label>
+										<Label htmlFor="edit-avatar">头像 URL</Label>
 										<Input
 											id="edit-avatar"
 											value={editAvatarUrl}
