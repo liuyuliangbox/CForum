@@ -190,7 +190,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 23;
 
 const DEFAULT_AVATAR_PRESET_COUNT = 12;
 const DEFAULT_AVATAR_PRESETS = Array.from(
@@ -453,6 +453,11 @@ export default {
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_tagline', '由 Cloudflare Workers、Pages、D1、R2 提供服务。');`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_post_status_change', '1');`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_site_feature', '1');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_enabled', '1');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_posts', '3');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_lists', '2');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_hard_posts', '5');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_hard_lists', '4');`,
 					`INSERT OR IGNORE INTO users (email, username, password, role, verified, nickname) VALUES 
 ('admin@adysec.com', 'Admin', 'e86f78a8a3caf0b60d8e74e5942aa6d86dc150cd3c03338aef25b7d2d7e3acc7', 'admin', 1, 'System Admin');`
 				];
@@ -717,8 +722,23 @@ export default {
 				await env.cforum_db
 					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_site_feature', '1')`)
 					.run();
+				await env.cforum_db
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_enabled', '1')`)
+					.run();
+				await env.cforum_db
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_posts', '3')`)
+					.run();
+				await env.cforum_db
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_lists', '2')`)
+					.run();
+				await env.cforum_db
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_hard_posts', '5')`)
+					.run();
+				await env.cforum_db
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_hard_lists', '4')`)
+					.run();
 			} catch (e) {
-				console.error('Failed to seed notify_on_post_status_change / notify_on_site_feature', e);
+				console.error('Failed to seed notify / guest_gate settings', e);
 			}
 			try {
 				await env.cforum_db
@@ -1084,7 +1104,14 @@ export default {
 			'notify_on_avatar_change',
 			'notify_on_manual_verify',
 			'notify_on_post_status_change',
-			'notify_on_site_feature'
+			'notify_on_site_feature',
+			'guest_gate_enabled'
+		]);
+		const INT_SETTING_KEYS = new Set([
+			'guest_gate_soft_posts',
+			'guest_gate_soft_lists',
+			'guest_gate_hard_posts',
+			'guest_gate_hard_lists'
 		]);
 		const STRING_SETTING_KEYS = new Set([
 			'site_title',
@@ -1101,6 +1128,11 @@ export default {
 			'ops_playbook',
 			'avatar_presets'
 		]);
+		const clampGuestGateInt = (raw: unknown, fallback: number) => {
+			const n = typeof raw === 'number' ? raw : parseInt(String(raw ?? ''), 10);
+			if (!Number.isFinite(n)) return fallback;
+			return Math.min(50, Math.max(1, Math.floor(n)));
+		};
 		const DEFAULT_FRIEND_LINKS_JSON = JSON.stringify([
 			{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }
 		]);
@@ -1146,11 +1178,22 @@ export default {
 		// GET /api/config
 		if (url.pathname === '/api/config' && method === 'GET') {
 			try {
-				const [setting, userCount, titleRow, taglineRow] = await Promise.all([
+				const [setting, userCount, titleRow, taglineRow, gateRows] = await Promise.all([
 					env.cforum_db.prepare("SELECT value FROM settings WHERE key = 'turnstile_enabled'").first<DBSetting>(),
 					env.cforum_db.prepare('SELECT COUNT(*) as count FROM users').first('count'),
 					env.cforum_db.prepare("SELECT value FROM settings WHERE key = 'site_title'").first<DBSetting>(),
-					env.cforum_db.prepare("SELECT value FROM settings WHERE key = 'site_tagline'").first<DBSetting>()
+					env.cforum_db.prepare("SELECT value FROM settings WHERE key = 'site_tagline'").first<DBSetting>(),
+					env.cforum_db
+						.prepare(
+							`SELECT key, value FROM settings WHERE key IN (
+								'guest_gate_enabled',
+								'guest_gate_soft_posts',
+								'guest_gate_soft_lists',
+								'guest_gate_hard_posts',
+								'guest_gate_hard_lists'
+							)`
+						)
+						.all<DBSetting & { key: string }>()
 				]);
 				
 				// 只有数据库设置为启用，且两个环境变量都配置时，才启用 Turnstile
@@ -1158,6 +1201,12 @@ export default {
 				const siteKey = (env as any).TURNSTILE_SITE_KEY || '';
 				const secretKey = (env as any).TURNSTILE_SECRET_KEY || '';
 				const turnstileFullyConfigured = !!(dbEnabled && siteKey && secretKey);
+
+				const gateMap = new Map<string, string>();
+				for (const row of gateRows.results || []) {
+					gateMap.set(String((row as any).key), String((row as any).value));
+				}
+				const gateEnabled = !gateMap.has('guest_gate_enabled') || gateMap.get('guest_gate_enabled') === '1';
 				
 				return jsonResponse({
 					turnstile_enabled: turnstileFullyConfigured,
@@ -1165,7 +1214,12 @@ export default {
 					user_count: userCount || 0,
 					jwt_secret_configured: !!env.JWT_SECRET && String(env.JWT_SECRET).length >= 32,
 					site_title: titleRow?.value || 'liuyuliangbox / Project Turn',
-					site_tagline: taglineRow?.value || '由 Cloudflare Workers、Pages、D1、R2 提供服务。'
+					site_tagline: taglineRow?.value || '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
+					guest_gate_enabled: gateEnabled,
+					guest_gate_soft_posts: clampGuestGateInt(gateMap.get('guest_gate_soft_posts'), 3),
+					guest_gate_soft_lists: clampGuestGateInt(gateMap.get('guest_gate_soft_lists'), 2),
+					guest_gate_hard_posts: clampGuestGateInt(gateMap.get('guest_gate_hard_posts'), 5),
+					guest_gate_hard_lists: clampGuestGateInt(gateMap.get('guest_gate_hard_lists'), 4)
 				});
 			} catch (e) {
 				return handleError(e);
@@ -1187,6 +1241,11 @@ export default {
 					notify_on_manual_verify: false,
 					notify_on_post_status_change: true,
 					notify_on_site_feature: true,
+					guest_gate_enabled: true,
+					guest_gate_soft_posts: 3,
+					guest_gate_soft_lists: 2,
+					guest_gate_hard_posts: 5,
+					guest_gate_hard_lists: 4,
 					site_title: 'liuyuliangbox / Project Turn',
 					site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
 					...SITE_META_DEFAULTS
@@ -1198,6 +1257,8 @@ export default {
 						const value = row.value as string;
 						if (BOOL_SETTING_KEYS.has(key)) {
 							config[key] = value === '1';
+						} else if (INT_SETTING_KEYS.has(key)) {
+							config[key] = clampGuestGateInt(value, config[key] ?? 1);
 						} else if (STRING_SETTING_KEYS.has(key)) {
 							config[key] = value;
 						}
@@ -1281,6 +1342,11 @@ export default {
 					notify_on_manual_verify,
 					notify_on_post_status_change,
 					notify_on_site_feature,
+					guest_gate_enabled,
+					guest_gate_soft_posts,
+					guest_gate_soft_lists,
+					guest_gate_hard_posts,
+					guest_gate_hard_lists,
 					site_title,
 					site_tagline,
 					site_brand,
@@ -1309,6 +1375,21 @@ export default {
 				}
 				if (notify_on_site_feature !== undefined) {
 					batch.push(stmt.bind('notify_on_site_feature', notify_on_site_feature ? '1' : '0'));
+				}
+				if (guest_gate_enabled !== undefined) {
+					batch.push(stmt.bind('guest_gate_enabled', guest_gate_enabled ? '1' : '0'));
+				}
+				if (guest_gate_soft_posts !== undefined) {
+					batch.push(stmt.bind('guest_gate_soft_posts', String(clampGuestGateInt(guest_gate_soft_posts, 3))));
+				}
+				if (guest_gate_soft_lists !== undefined) {
+					batch.push(stmt.bind('guest_gate_soft_lists', String(clampGuestGateInt(guest_gate_soft_lists, 2))));
+				}
+				if (guest_gate_hard_posts !== undefined) {
+					batch.push(stmt.bind('guest_gate_hard_posts', String(clampGuestGateInt(guest_gate_hard_posts, 5))));
+				}
+				if (guest_gate_hard_lists !== undefined) {
+					batch.push(stmt.bind('guest_gate_hard_lists', String(clampGuestGateInt(guest_gate_hard_lists, 4))));
 				}
 				if (site_title !== undefined) batch.push(stmt.bind('site_title', String(site_title).slice(0, 80)));
 				if (site_tagline !== undefined) batch.push(stmt.bind('site_tagline', String(site_tagline).slice(0, 160)));

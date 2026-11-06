@@ -9,6 +9,7 @@ import { useConfig } from '@/hooks/use-config';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import { getSecurityHeaders } from '@/lib/api';
 import { setToken, setUser } from '@/lib/auth';
+import { sanitizeNextPath } from '@/lib/guest-interest';
 
 type LoginStep = 'credentials' | 'totp';
 
@@ -74,7 +75,8 @@ export function LoginPage() {
 
 			setUser(data.user);
 			setToken(data.token);
-			window.location.href = '/';
+			const next = sanitizeNextPath(new URLSearchParams(window.location.search).get('next'), '/');
+			window.location.href = next;
 		} catch (err: any) {
 			setError(String(err?.message || err));
 		} finally {
@@ -174,7 +176,10 @@ export function LoginPage() {
 								</Button>
 							) : (
 								<div className="flex justify-between text-sm">
-									<a className="text-muted-foreground hover:underline" href="/register">
+									<a
+										className="text-muted-foreground hover:underline"
+										href={`/register?next=${encodeURIComponent(sanitizeNextPath(new URLSearchParams(window.location.search).get('next'), '/'))}`}
+									>
 										没有账号？注册
 									</a>
 									<a className="text-muted-foreground hover:underline" href="/forgot">

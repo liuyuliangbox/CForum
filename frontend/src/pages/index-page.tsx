@@ -2,6 +2,7 @@ import * as React from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, EyeOff, Heart, MessageCircle, MoreVertical, Pin, RefreshCw, Search, Shield, Star, Trash2, User, X } from 'lucide-react';
 
 import { AdminCooldownMenuItems } from '@/components/admin-cooldown-menu';
+import { GuestGateDialog } from '@/components/guest-gate-dialog';
 import { MarkdownToolbar } from '@/components/markdown-toolbar';
 import { TurnstileWidget } from '@/components/turnstile';
 import { PageShell } from '@/components/page-shell';
@@ -23,6 +24,14 @@ import {
 	type RelatedPostCard
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
+import {
+	currentPageAsNext,
+	isHardGated,
+	markSoftShown,
+	parseGuestGateFromConfig,
+	recordListFetch,
+	type GatePrompt
+} from '@/lib/guest-interest';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
 import {
 	handleMarkdownEditorKeyDown,
@@ -38,6 +47,8 @@ export function IndexPage() {
 	const { config } = useConfig();
 	const token = getToken();
 	const user = React.useMemo(() => getUser(), [token]);
+	const gateThresholds = React.useMemo(() => parseGuestGateFromConfig(config), [config]);
+	const [gatePrompt, setGatePrompt] = React.useState<'soft' | 'hard' | null>(null);
 	const [banner, setBanner] = React.useState<string>('');
 	const [categories, setCategories] = React.useState<Category[]>([]);
 	const [selectedCategory, setSelectedCategory] = React.useState<string>('');
@@ -53,6 +64,27 @@ export function IndexPage() {
 	const [loading, setLoading] = React.useState<boolean>(true);
 	const [error, setError] = React.useState<string>('');
 	const pageLimit = 10;
+
+	const showGatePrompt = React.useCallback((prompt: GatePrompt) => {
+		if (prompt === 'soft') {
+			markSoftShown();
+			setGatePrompt('soft');
+		} else if (prompt === 'hard') {
+			setGatePrompt('hard');
+		}
+	}, []);
+
+	const blockIfHardPaginate = React.useCallback(
+		(offset: number) => {
+			if (user || !gateThresholds.enabled) return false;
+			if (offset > 0 && isHardGated()) {
+				setGatePrompt('hard');
+				return true;
+			}
+			return false;
+		},
+		[user, gateThresholds.enabled]
+	);
 	const [jumpTo, setJumpTo] = React.useState<string>('');
 
 	const [newTitle, setNewTitle] = React.useState('');
@@ -202,6 +234,7 @@ export function IndexPage() {
 
 	const fetchPosts = React.useCallback(
 		async (offset: number) => {
+			if (blockIfHardPaginate(offset)) return;
 			setLoading(true);
 			setError('');
 			try {
@@ -248,13 +281,29 @@ export function IndexPage() {
 				setPosts(processed);
 				setTotalPosts(total);
 				setPageOffset(offset);
+				if (!user && gateThresholds.enabled) {
+					showGatePrompt(recordListFetch(gateThresholds));
+				}
 			} catch (e: any) {
 				setError(String(e?.message || e));
 			} finally {
 				setLoading(false);
 			}
 		},
-		[selectedCategory, siteFeaturedOnly, mineOnly, unrepliedOnly, statusFilter, searchQuery, sortOption, token]
+		[
+			selectedCategory,
+			siteFeaturedOnly,
+			mineOnly,
+			unrepliedOnly,
+			statusFilter,
+			searchQuery,
+			sortOption,
+			token,
+			user,
+			gateThresholds,
+			blockIfHardPaginate,
+			showGatePrompt
+		]
 	);
 
 	const selectedCategoryMeta = React.useMemo(
@@ -580,9 +629,21 @@ export function IndexPage() {
 		return () => window.clearInterval(id);
 	}, [needsPublishTick]);
 
+	function onGuestPostLinkCapture(e: React.MouseEvent) {
+		if (user || !gateThresholds.enabled || !isHardGated()) return;
+		const a = (e.target as HTMLElement | null)?.closest?.('a');
+		if (!a) return;
+		const href = a.getAttribute('href') || '';
+		if (/^\/post(\?|\/|$)/.test(href) || /^\/posts\//.test(href)) {
+			e.preventDefault();
+			e.stopPropagation();
+			setGatePrompt('hard');
+		}
+	}
+
 	return (
 		<PageShell>
-			<div className="space-y-6">
+			<div className="space-y-6" onClickCapture={onGuestPostLinkCapture}>
 				{banner ? <div className="rounded-md border bg-muted/40 p-3 text-sm">{banner}</div> : null}
 				<div className="space-y-4">
 					<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1420,6 +1481,14 @@ export function IndexPage() {
 					</form>
 				</div>
 			</div>
+			{gatePrompt ? (
+				<GuestGateDialog
+					mode={gatePrompt}
+					open
+					nextPath={currentPageAsNext()}
+					onDismissSoft={() => setGatePrompt(null)}
+				/>
+			) : null}
 		</PageShell>
 	);
 }

@@ -7,6 +7,11 @@ export type ForumConfig = {
 	jwt_secret_configured?: boolean; // indicates whether JWT_SECRET is set in backend
 	site_title?: string;
 	site_tagline?: string;
+	guest_gate_enabled?: boolean;
+	guest_gate_soft_posts?: number;
+	guest_gate_soft_lists?: number;
+	guest_gate_hard_posts?: number;
+	guest_gate_hard_lists?: number;
 };
 
 export type Category = {

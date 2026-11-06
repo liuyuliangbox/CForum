@@ -2,6 +2,7 @@ import * as React from 'react';
 import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, EyeOff, Heart, Link2, MessageCircle, MoreVertical, Pin, Pencil, Quote, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
 
 import { AdminCooldownMenuItems, AdminCooldownTrigger } from '@/components/admin-cooldown-menu';
+import { GuestGateDialog } from '@/components/guest-gate-dialog';
 import { MarkdownToolbar } from '@/components/markdown-toolbar';
 import { TurnstileWidget } from '@/components/turnstile';
 import { PageShell } from '@/components/page-shell';
@@ -22,6 +23,13 @@ import {
 	type RelatedPostCard
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
+import {
+	currentPageAsNext,
+	markSoftShown,
+	parseGuestGateFromConfig,
+	recordPostView,
+	type GatePrompt
+} from '@/lib/guest-interest';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
 import {
 	handleMarkdownEditorKeyDown,
@@ -36,6 +44,8 @@ export function PostPage() {
 	const token = getToken();
 	const user = React.useMemo(() => getUser(), [token]);
 	const { config } = useConfig();
+	const gateThresholds = React.useMemo(() => parseGuestGateFromConfig(config), [config]);
+	const [gatePrompt, setGatePrompt] = React.useState<'soft' | 'hard' | null>(null);
 	const enabled = !!config?.turnstile_enabled;
 	const siteKey = config?.turnstile_site_key || '';
 	const turnstileActive = enabled && !!siteKey;
@@ -177,6 +187,15 @@ export function PostPage() {
 
 	const userId = user?.id ?? null;
 
+	const showGatePrompt = React.useCallback((prompt: GatePrompt) => {
+		if (prompt === 'soft') {
+			markSoftShown();
+			setGatePrompt('soft');
+		} else if (prompt === 'hard') {
+			setGatePrompt('hard');
+		}
+	}, []);
+
 	const refresh = React.useCallback(async () => {
 		if (!postId) {
 			setError('帖子不存在');
@@ -196,12 +215,15 @@ export function PostPage() {
 			setComments(cs);
 			setEditTitle(p.title);
 			setEditContent(p.content);
+			if (!user && gateThresholds.enabled) {
+				showGatePrompt(recordPostView(p.id, gateThresholds));
+			}
 		} catch (e: any) {
 			setError(String(e?.message || e));
 		} finally {
 			setLoading(false);
 		}
-	}, [postId, userId]);
+	}, [postId, userId, user, gateThresholds, showGatePrompt]);
 
 	React.useEffect(() => {
 		refresh();
@@ -1586,6 +1608,14 @@ export function PostPage() {
 					</>
 				)}
 			</div>
+			{gatePrompt ? (
+				<GuestGateDialog
+					mode={gatePrompt}
+					open
+					nextPath={currentPageAsNext()}
+					onDismissSoft={() => setGatePrompt(null)}
+				/>
+			) : null}
 		</PageShell>
 	);
 }

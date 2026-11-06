@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { useConfig } from '@/hooks/use-config';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import { getSecurityHeaders } from '@/lib/api';
+import { sanitizeNextPath } from '@/lib/guest-interest';
 
 export function RegisterPage() {
 	const { config } = useConfig();
@@ -52,12 +53,17 @@ export function RegisterPage() {
 				setTurnstileResetKey((v) => v + 1);
 				throw new Error(data?.error || '注册失败');
 			}
+			const next = sanitizeNextPath(new URLSearchParams(window.location.search).get('next'), '/');
+			const loginQ = new URLSearchParams({ next });
 			setSuccess('注册成功！请前往邮箱完成验证后再登录。');
 			setEmail('');
 			setUsername('');
 			setPassword('');
 			setTurnstileToken('');
 			setTurnstileResetKey((v) => v + 1);
+			window.setTimeout(() => {
+				window.location.href = `/login?${loginQ.toString()}`;
+			}, 1600);
 		} catch (err: any) {
 			setError(String(err?.message || err));
 		} finally {
@@ -123,7 +129,10 @@ export function RegisterPage() {
 							</Button>
 
 							<div className="text-sm">
-								<a className="text-muted-foreground hover:underline" href="/login">
+								<a
+									className="text-muted-foreground hover:underline"
+									href={`/login?next=${encodeURIComponent(sanitizeNextPath(new URLSearchParams(window.location.search).get('next'), '/'))}`}
+								>
 									已有账号？登录
 								</a>
 							</div>

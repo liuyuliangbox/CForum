@@ -56,6 +56,11 @@ export function AdminPage() {
 		notify_on_manual_verify: false,
 		notify_on_post_status_change: true,
 		notify_on_site_feature: true,
+		guest_gate_enabled: true,
+		guest_gate_soft_posts: 3,
+		guest_gate_soft_lists: 2,
+		guest_gate_hard_posts: 5,
+		guest_gate_hard_lists: 4,
 		site_title: DEFAULT_SITE_TITLE,
 		site_tagline: DEFAULT_SITE_TAGLINE,
 		site_brand: 'liuyuliangbox',
@@ -192,6 +197,11 @@ export function AdminPage() {
 				notify_on_manual_verify: !!settings.notify_on_manual_verify,
 				notify_on_post_status_change: settings.notify_on_post_status_change !== false,
 				notify_on_site_feature: settings.notify_on_site_feature !== false,
+				guest_gate_enabled: settings.guest_gate_enabled !== false,
+				guest_gate_soft_posts: Number(settings.guest_gate_soft_posts) || 3,
+				guest_gate_soft_lists: Number(settings.guest_gate_soft_lists) || 2,
+				guest_gate_hard_posts: Number(settings.guest_gate_hard_posts) || 5,
+				guest_gate_hard_lists: Number(settings.guest_gate_hard_lists) || 4,
 				site_title: settings.site_title || DEFAULT_SITE_TITLE,
 				site_tagline: settings.site_tagline || DEFAULT_SITE_TAGLINE,
 				site_brand: settings.site_brand || 'liuyuliangbox',
@@ -882,6 +892,84 @@ export function AdminPage() {
 										/>
 										官网精选变更时邮件通知作者
 									</label>
+									<label className="flex items-center gap-2 text-sm">
+										<input
+											type="checkbox"
+											className="h-4 w-4"
+											checked={systemSettings.guest_gate_enabled}
+											onChange={(e) =>
+												setSystemSettings((s) => ({ ...s, guest_gate_enabled: e.target.checked }))
+											}
+										/>
+										启用游客兴趣转化门禁（先软后硬）
+									</label>
+									{systemSettings.guest_gate_enabled ? (
+										<div className="grid gap-2 rounded-md border border-dashed p-3 sm:grid-cols-2">
+											<label className="space-y-1 text-sm">
+												<span className="text-muted-foreground">软提示：不同帖数 ≥</span>
+												<Input
+													type="number"
+													min={1}
+													max={50}
+													value={systemSettings.guest_gate_soft_posts}
+													onChange={(e) =>
+														setSystemSettings((s) => ({
+															...s,
+															guest_gate_soft_posts: Number(e.target.value) || 3
+														}))
+													}
+												/>
+											</label>
+											<label className="space-y-1 text-sm">
+												<span className="text-muted-foreground">软提示：列表加载次数 ≥</span>
+												<Input
+													type="number"
+													min={1}
+													max={50}
+													value={systemSettings.guest_gate_soft_lists}
+													onChange={(e) =>
+														setSystemSettings((s) => ({
+															...s,
+															guest_gate_soft_lists: Number(e.target.value) || 2
+														}))
+													}
+												/>
+											</label>
+											<label className="space-y-1 text-sm">
+												<span className="text-muted-foreground">硬拦住：不同帖数 ≥</span>
+												<Input
+													type="number"
+													min={1}
+													max={50}
+													value={systemSettings.guest_gate_hard_posts}
+													onChange={(e) =>
+														setSystemSettings((s) => ({
+															...s,
+															guest_gate_hard_posts: Number(e.target.value) || 5
+														}))
+													}
+												/>
+											</label>
+											<label className="space-y-1 text-sm">
+												<span className="text-muted-foreground">硬拦住：列表加载次数 ≥</span>
+												<Input
+													type="number"
+													min={1}
+													max={50}
+													value={systemSettings.guest_gate_hard_lists}
+													onChange={(e) =>
+														setSystemSettings((s) => ({
+															...s,
+															guest_gate_hard_lists: Number(e.target.value) || 4
+														}))
+													}
+												/>
+											</label>
+											<p className="text-xs text-muted-foreground sm:col-span-2">
+												达到软阈值弹窗可关闭；继续浏览达到硬阈值后，翻页或打开新帖需登录。
+											</p>
+										</div>
+									) : null}
 								</div>
 								<div className="space-y-2">
 									<Label htmlFor="allowed-link-hosts">链接域名白名单（一行一个）</Label>
