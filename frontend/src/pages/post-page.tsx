@@ -666,7 +666,7 @@ export function PostPage() {
 					<div className="flex flex-wrap items-center gap-2">
 						<Button
 							type="button"
-							variant="ghost"
+							variant="outline"
 							size="sm"
 							onClick={() => {
 								opts.onExpandedChange(!opts.expanded);
@@ -681,7 +681,7 @@ export function PostPage() {
 							) : (
 								<>
 									<ChevronDown className="h-4 w-4" />
-									展开（共 {items.length}）
+									展开 · 共 {items.length} 个
 								</>
 							)}
 						</Button>
