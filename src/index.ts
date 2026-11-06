@@ -27,6 +27,48 @@ import {
 	serializeStatusOptions
 } from './category-status';
 
+/** Validate cited_post_id for create/update. Returns error message or null. */
+async function validateCitedPostId(
+	db: D1Database,
+	opts: {
+		citedPostId: number | null;
+		sourcePostId?: number | null;
+		sourceCategoryId: number;
+	}
+): Promise<string | null> {
+	const citedId = opts.citedPostId;
+	if (citedId == null) return null;
+	if (!Number.isFinite(citedId) || citedId <= 0) return '引用帖无效';
+	if (opts.sourcePostId != null && citedId === opts.sourcePostId) return '不能引用自己';
+	const sourceCat = await db
+		.prepare(`SELECT IFNULL(enable_cite, 0) AS enable_cite FROM categories WHERE id = ?`)
+		.bind(opts.sourceCategoryId)
+		.first<{ enable_cite: number }>();
+	if (!sourceCat || Number(sourceCat.enable_cite) !== 1) return '该分类未启用引用他人';
+	const target = await db
+		.prepare(
+			`SELECT posts.id, IFNULL(posts.is_visible, 1) AS is_visible,
+				IFNULL(categories.enable_cited_from, 0) AS enable_cited_from
+			 FROM posts
+			 LEFT JOIN categories ON posts.category_id = categories.id
+			 WHERE posts.id = ?`
+		)
+		.bind(citedId)
+		.first<{ id: number; is_visible: number; enable_cited_from: number }>();
+	if (!target) return '引用的帖子不存在';
+	if (Number(target.is_visible) !== 1) return '引用的帖子不可见';
+	if (Number(target.enable_cited_from) !== 1) return '目标帖分类未启用被引用';
+	return null;
+}
+
+const RELATION_CARD_SQL = `SELECT
+		posts.id, posts.title, posts.status, posts.category_id, posts.created_at,
+		categories.name AS category_name,
+		users.username AS author_name
+	 FROM posts
+	 JOIN users ON posts.author_id = users.id
+	 LEFT JOIN categories ON posts.category_id = categories.id`;
+
 interface DBUser {
     id: number;
     email: string;
@@ -145,7 +187,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 let schemaReadyInIsolate = false;
 
 export default {
@@ -482,7 +524,49 @@ export default {
 				// column already exists
 			}
 			try {
+				await env.cforum_db
+					.prepare(`ALTER TABLE categories ADD COLUMN enable_cite INTEGER NOT NULL DEFAULT 0`)
+					.run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db
+					.prepare(`ALTER TABLE categories ADD COLUMN enable_cited_from INTEGER NOT NULL DEFAULT 0`)
+					.run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db
+					.prepare(`ALTER TABLE categories ADD COLUMN enable_relate INTEGER NOT NULL DEFAULT 0`)
+					.run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db
+					.prepare(
+						`UPDATE categories SET enable_relate = 1
+						 WHERE IFNULL(enable_relate_others, 0) = 1 AND IFNULL(enable_relate, 0) = 0`
+					)
+					.run();
+				await env.cforum_db
+					.prepare(
+						`UPDATE categories SET enable_cited_from = 1
+						 WHERE IFNULL(enable_linked_from, 0) = 1 AND IFNULL(enable_cited_from, 0) = 0`
+					)
+					.run();
+			} catch (e) {
+				console.error('Failed to migrate category cite/relate flags', e);
+			}
+			try {
 				await env.cforum_db.prepare(`ALTER TABLE posts ADD COLUMN status TEXT`).run();
+			} catch {
+				// column already exists
+			}
+			try {
+				await env.cforum_db.prepare(`ALTER TABLE posts ADD COLUMN cited_post_id INTEGER`).run();
 			} catch {
 				// column already exists
 			}
@@ -504,6 +588,31 @@ export default {
 					.run();
 			} catch (e) {
 				console.error('Failed to ensure post_relations table', e);
+			}
+			try {
+				await env.cforum_db
+					.prepare(
+						`CREATE TABLE IF NOT EXISTS post_relations_undirected (
+  post_low_id INTEGER NOT NULL,
+  post_high_id INTEGER NOT NULL,
+  created_by INTEGER NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (post_low_id, post_high_id),
+  CHECK (post_low_id < post_high_id)
+)`
+					)
+					.run();
+				await env.cforum_db
+					.prepare(
+						`INSERT OR IGNORE INTO post_relations_undirected (post_low_id, post_high_id, created_by, created_at)
+						 SELECT CASE WHEN from_post_id < to_post_id THEN from_post_id ELSE to_post_id END,
+						        CASE WHEN from_post_id < to_post_id THEN to_post_id ELSE from_post_id END,
+						        created_by, created_at
+						 FROM post_relations`
+					)
+					.run();
+			} catch (e) {
+				console.error('Failed to migrate undirected post_relations', e);
 			}
 			try {
 				await env.cforum_db
@@ -1757,8 +1866,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 							IFNULL(sort_order, 0) AS sort_order,
 							IFNULL(status_options, '[]') AS status_options,
 							IFNULL(author_can_set_status, 0) AS author_can_set_status,
-							IFNULL(enable_relate_others, 0) AS enable_relate_others,
-							IFNULL(enable_linked_from, 0) AS enable_linked_from,
+							IFNULL(enable_cite, 0) AS enable_cite,
+							IFNULL(enable_cited_from, 0) AS enable_cited_from,
+							IFNULL(enable_relate, 0) AS enable_relate,
 							created_at
 						 FROM categories
 						 ORDER BY IFNULL(sort_order, 0) ASC, id ASC`
@@ -1774,8 +1884,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						sort_order: Number(row.sort_order || 0),
 						status_options: parseStatusOptions(row.status_options),
 						author_can_set_status: Number(row.author_can_set_status) === 1,
-						enable_relate_others: Number(row.enable_relate_others) === 1,
-						enable_linked_from: Number(row.enable_linked_from) === 1
+						enable_cite: Number(row.enable_cite) === 1,
+						enable_cited_from: Number(row.enable_cited_from) === 1,
+						enable_relate: Number(row.enable_relate) === 1
 					}))
 				);
 			} catch (e) {
@@ -2102,8 +2213,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					subtitle,
 					status_options,
 					author_can_set_status,
-					enable_relate_others,
-					enable_linked_from
+					enable_cite,
+					enable_cited_from,
+					enable_relate
 				} = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				const subtitleValue = show_on_site ? String(subtitle || '').trim().slice(0, 200) : '';
@@ -2120,8 +2232,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					.prepare(
 						`INSERT INTO categories
 							(name, subtitle, admin_only, show_on_site, show_on_forum, sort_order, status_options,
-							 author_can_set_status, enable_relate_others, enable_linked_from)
-						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+							 author_can_set_status, enable_cite, enable_cited_from, enable_relate)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 					)
 					.bind(
 						name,
@@ -2132,8 +2244,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						sortOrder,
 						statusOptionsJson,
 						author_can_set_status ? 1 : 0,
-						enable_relate_others ? 1 : 0,
-						enable_linked_from ? 1 : 0
+						enable_cite ? 1 : 0,
+						enable_cited_from ? 1 : 0,
+						enable_relate ? 1 : 0
 					)
 					.run();
 				bumpMetaCacheVersion();
@@ -2145,8 +2258,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					sort_order: sortOrder,
 					status_options: parseStatusOptions(statusOptionsJson),
 					author_can_set_status: !!author_can_set_status,
-					enable_relate_others: !!enable_relate_others,
-					enable_linked_from: !!enable_linked_from
+					enable_cite: !!enable_cite,
+					enable_cited_from: !!enable_cited_from,
+					enable_relate: !!enable_relate
 				}, request);
 				return jsonResponse({ success });
 			} catch (e) {
@@ -2170,8 +2284,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					subtitle,
 					status_options,
 					author_can_set_status,
-					enable_relate_others,
-					enable_linked_from
+					enable_cite,
+					enable_cited_from,
+					enable_relate
 				} = body;
 				if (!name) return jsonResponse({ error: 'Missing name' }, 400);
 				const subtitleValue = show_on_site ? String(subtitle || '').trim().slice(0, 200) : '';
@@ -2180,7 +2295,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				await env.cforum_db
 					.prepare(
 						`UPDATE categories SET name = ?, subtitle = ?, admin_only = ?, show_on_site = ?, show_on_forum = ?,
-							status_options = ?, author_can_set_status = ?, enable_relate_others = ?, enable_linked_from = ?
+							status_options = ?, author_can_set_status = ?,
+							enable_cite = ?, enable_cited_from = ?, enable_relate = ?
 						 WHERE id = ?`
 					)
 					.bind(
@@ -2191,8 +2307,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						show_on_forum === false || show_on_forum === 0 ? 0 : 1,
 						statusOptionsJson,
 						author_can_set_status ? 1 : 0,
-						enable_relate_others ? 1 : 0,
-						enable_linked_from ? 1 : 0,
+						enable_cite ? 1 : 0,
+						enable_cited_from ? 1 : 0,
+						enable_relate ? 1 : 0,
 						id
 					)
 					.run();
@@ -2205,8 +2322,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					subtitle: subtitleValue,
 					status_options: parseStatusOptions(statusOptionsJson),
 					author_can_set_status: !!author_can_set_status,
-					enable_relate_others: !!enable_relate_others,
-					enable_linked_from: !!enable_linked_from
+					enable_cite: !!enable_cite,
+					enable_cited_from: !!enable_cited_from,
+					enable_relate: !!enable_relate
 				}, request);
 				return jsonResponse({ success: true });
 			} catch (e) {
@@ -3004,7 +3122,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					`SELECT 
                         posts.id, posts.author_id, posts.title, posts.content, posts.category_id,
                         posts.is_pinned, posts.is_visible, posts.author_publish_until, posts.site_featured,
-                        posts.status, posts.view_count, posts.created_at,
+                        posts.status, posts.cited_post_id, posts.view_count, posts.created_at,
                         users.username as author_name, 
                         users.avatar_url as author_avatar,
                         users.role as author_role,
@@ -3012,8 +3130,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						IFNULL(categories.show_on_forum, 1) AS category_show_on_forum,
 						IFNULL(categories.status_options, '[]') AS category_status_options,
 						IFNULL(categories.author_can_set_status, 0) AS category_author_can_set_status,
-						IFNULL(categories.enable_relate_others, 0) AS category_enable_relate_others,
-						IFNULL(categories.enable_linked_from, 0) AS category_enable_linked_from,
+						IFNULL(categories.enable_cite, 0) AS category_enable_cite,
+						IFNULL(categories.enable_cited_from, 0) AS category_enable_cited_from,
+						IFNULL(categories.enable_relate, 0) AS category_enable_relate,
                         (SELECT COUNT(*) FROM likes WHERE likes.post_id = posts.id) as like_count,
                         (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) as comment_count
                      FROM posts 
@@ -3048,66 +3167,116 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					(post as any).liked = !!like;
 				}
 
-				const enableRelateOthers = Number((post as any).category_enable_relate_others) === 1;
-				const enableLinkedFrom = Number((post as any).category_enable_linked_from) === 1;
-				const relationCardSql = `SELECT
-						posts.id, posts.title, posts.status, posts.category_id, posts.created_at,
-						categories.name AS category_name,
-						users.username AS author_name
-					 FROM posts
-					 JOIN users ON posts.author_id = users.id
-					 LEFT JOIN categories ON posts.category_id = categories.id`;
-				let related_posts: any[] = [];
-				let linked_from_posts: any[] = [];
-				if (enableRelateOthers) {
-					const { results } = await env.cforum_db
+				const enableRelate = Number((post as any).category_enable_relate) === 1;
+				const enableCitedFrom = Number((post as any).category_enable_cited_from) === 1;
+				const mapCard = (row: any) => ({ ...row, status: row.status || null });
+
+				let cited_post: any = null;
+				const citedId = (post as any).cited_post_id != null ? Number((post as any).cited_post_id) : null;
+				if (citedId) {
+					const cited = await env.cforum_db
 						.prepare(
-							`${relationCardSql}
-							 INNER JOIN post_relations pr ON pr.to_post_id = posts.id
-							 WHERE pr.from_post_id = ?
-							   AND IFNULL(posts.is_visible, 1) = 1
-							 ORDER BY pr.created_at DESC`
+							`${RELATION_CARD_SQL}
+							 WHERE posts.id = ? AND IFNULL(posts.is_visible, 1) = 1`
 						)
-						.bind(postId)
-						.all();
-					related_posts = (results || []).map((row: any) => ({
-						...row,
-						status: row.status || null
-					}));
+						.bind(citedId)
+						.first();
+					if (cited) cited_post = mapCard(cited);
 				}
-				if (enableLinkedFrom) {
+
+				let cited_by_posts: any[] = [];
+				if (enableCitedFrom) {
 					const { results } = await env.cforum_db
 						.prepare(
-							`${relationCardSql}
-							 INNER JOIN post_relations pr ON pr.from_post_id = posts.id
-							 WHERE pr.to_post_id = ?
+							`${RELATION_CARD_SQL}
+							 WHERE posts.cited_post_id = ?
 							   AND IFNULL(posts.is_visible, 1) = 1
-							 ORDER BY pr.created_at DESC`
+							 ORDER BY posts.created_at DESC
+							 LIMIT 50`
 						)
 						.bind(postId)
 						.all();
-					linked_from_posts = (results || []).map((row: any) => ({
-						...row,
-						status: row.status || null
-					}));
+					cited_by_posts = (results || []).map(mapCard);
+				}
+
+				let related_posts: any[] = [];
+				if (enableRelate) {
+					const { results } = await env.cforum_db
+						.prepare(
+							`${RELATION_CARD_SQL}
+							 INNER JOIN post_relations_undirected pr
+							   ON (pr.post_low_id = posts.id OR pr.post_high_id = posts.id)
+							 WHERE (pr.post_low_id = ? OR pr.post_high_id = ?)
+							   AND posts.id != ?
+							   AND IFNULL(posts.is_visible, 1) = 1
+							 ORDER BY pr.created_at DESC`
+						)
+						.bind(postId, postId, postId)
+						.all();
+					related_posts = (results || []).map(mapCard);
 				}
 
 				return jsonResponse({
 					...post,
+					cited_post_id: citedId,
 					status: (post as any).status || null,
 					category_status_options: parseStatusOptions((post as any).category_status_options),
 					category_author_can_set_status: Number((post as any).category_author_can_set_status) === 1,
-					category_enable_relate_others: enableRelateOthers,
-					category_enable_linked_from: enableLinkedFrom,
-					related_posts,
-					linked_from_posts
+					category_enable_cite: Number((post as any).category_enable_cite) === 1,
+					category_enable_cited_from: enableCitedFrom,
+					category_enable_relate: enableRelate,
+					cited_post,
+					cited_by_posts,
+					related_posts
 				});
 			} catch (e) {
 				return handleError(e);
 			}
 		}
 
-		// PUT /api/posts/:id/relations — admin only; replace outgoing related posts
+		// PUT /api/posts/:id/cite — admin only; set or clear single citation
+		if (url.pathname.match(/^\/api\/posts\/\d+\/cite$/) && method === 'PUT') {
+			const postId = Number(url.pathname.split('/')[3]);
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const body = (await request.json()) as any;
+				const raw = body?.cited_post_id;
+				const citedPostId =
+					raw === null || raw === undefined || raw === ''
+						? null
+						: Number(raw);
+				const post = await env.cforum_db
+					.prepare(`SELECT id, category_id FROM posts WHERE id = ?`)
+					.bind(postId)
+					.first<{ id: number; category_id: number | null }>();
+				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
+				if (post.category_id == null) return jsonResponse({ error: '帖子无分类' }, 400);
+				const citeErr = await validateCitedPostId(env.cforum_db, {
+					citedPostId,
+					sourcePostId: postId,
+					sourceCategoryId: Number(post.category_id)
+				});
+				if (citeErr) return jsonResponse({ error: citeErr }, 400);
+				await env.cforum_db
+					.prepare(`UPDATE posts SET cited_post_id = ? WHERE id = ?`)
+					.bind(citedPostId, postId)
+					.run();
+				await security.logAudit(
+					userPayload.id,
+					'SET_POST_CITE',
+					'post',
+					String(postId),
+					{ cited_post_id: citedPostId },
+					request
+				);
+				return jsonResponse({ success: true, cited_post_id: citedPostId });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// PUT /api/posts/:id/relations — admin only; replace undirected related neighbors
 		if (url.pathname.match(/^\/api\/posts\/\d+\/relations$/) && method === 'PUT') {
 			const postId = Number(url.pathname.split('/')[3]);
 			try {
@@ -3117,16 +3286,16 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const source = await env.cforum_db
 					.prepare(
 						`SELECT posts.id, posts.category_id,
-							IFNULL(categories.enable_relate_others, 0) AS enable_relate_others
+							IFNULL(categories.enable_relate, 0) AS enable_relate
 						 FROM posts
 						 LEFT JOIN categories ON posts.category_id = categories.id
 						 WHERE posts.id = ?`
 					)
 					.bind(postId)
-					.first<{ id: number; category_id: number | null; enable_relate_others: number }>();
+					.first<{ id: number; category_id: number | null; enable_relate: number }>();
 				if (!source) return jsonResponse({ error: 'Post not found' }, 404);
-				if (Number(source.enable_relate_others) !== 1) {
-					return jsonResponse({ error: '该分类未启用关联其他' }, 400);
+				if (Number(source.enable_relate) !== 1) {
+					return jsonResponse({ error: '该分类未启用关联' }, 400);
 				}
 
 				const body = (await request.json()) as any;
@@ -3144,35 +3313,42 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					const { results: targets } = await env.cforum_db
 						.prepare(
 							`SELECT posts.id,
-								IFNULL(categories.enable_linked_from, 0) AS enable_linked_from,
+								IFNULL(categories.enable_relate, 0) AS enable_relate,
 								IFNULL(posts.is_visible, 1) AS is_visible
 							 FROM posts
 							 LEFT JOIN categories ON posts.category_id = categories.id
 							 WHERE posts.id IN (${placeholders})`
 						)
 						.bind(...relatedIds)
-						.all<{ id: number; enable_linked_from: number; is_visible: number }>();
+						.all<{ id: number; enable_relate: number; is_visible: number }>();
 					const byId = new Map((targets || []).map((t) => [Number(t.id), t]));
 					for (const id of relatedIds) {
 						const t = byId.get(id);
 						if (!t) return jsonResponse({ error: `目标帖不存在: ${id}` }, 400);
 						if (Number(t.is_visible) !== 1) return jsonResponse({ error: `目标帖不可见: ${id}` }, 400);
-						if (Number(t.enable_linked_from) !== 1) {
-							return jsonResponse({ error: `目标帖分类未启用被关联: ${id}` }, 400);
+						if (Number(t.enable_relate) !== 1) {
+							return jsonResponse({ error: `目标帖分类未启用关联: ${id}` }, 400);
 						}
 					}
 				}
 
 				await env.cforum_db
-					.prepare(`DELETE FROM post_relations WHERE from_post_id = ?`)
-					.bind(postId)
+					.prepare(
+						`DELETE FROM post_relations_undirected WHERE post_low_id = ? OR post_high_id = ?`
+					)
+					.bind(postId, postId)
 					.run();
 				if (relatedIds.length) {
 					const insert = env.cforum_db.prepare(
-						`INSERT INTO post_relations (from_post_id, to_post_id, created_by) VALUES (?, ?, ?)`
+						`INSERT OR IGNORE INTO post_relations_undirected (post_low_id, post_high_id, created_by)
+						 VALUES (?, ?, ?)`
 					);
 					await env.cforum_db.batch(
-						relatedIds.map((toId) => insert.bind(postId, toId, userPayload.id))
+						relatedIds.map((otherId) => {
+							const low = Math.min(postId, otherId);
+							const high = Math.max(postId, otherId);
+							return insert.bind(low, high, userPayload.id);
+						})
 					);
 				}
 				await security.logAudit(
@@ -3361,7 +3537,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				// Check ownership or admin
 				const post = await env.cforum_db
 					.prepare(
-						'SELECT author_id, IFNULL(is_visible, 1) AS is_visible FROM posts WHERE id = ?'
+						'SELECT author_id, IFNULL(is_visible, 1) AS is_visible, cited_post_id FROM posts WHERE id = ?'
 					)
 					.bind(postId)
 					.first<any>();
@@ -3415,11 +3591,33 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					return jsonResponse({ error: '该分类仅管理员可发帖' }, 403);
 				}
 
-				await env.cforum_db.prepare(
-					'UPDATE posts SET title = ?, content = ?, category_id = ? WHERE id = ?'
-				).bind(title.trim(), content.trim(), category_id, postId).run();
+				let nextCitedId =
+					post.cited_post_id != null ? Number(post.cited_post_id) : null;
+				if (isAdmin && Object.prototype.hasOwnProperty.call(body, 'cited_post_id')) {
+					const raw = body.cited_post_id;
+					nextCitedId =
+						raw === null || raw === undefined || raw === ''
+							? null
+							: Number(raw);
+					const citeErr = await validateCitedPostId(env.cforum_db, {
+						citedPostId: nextCitedId,
+						sourcePostId: Number(postId),
+						sourceCategoryId: Number(category_id)
+					});
+					if (citeErr) return jsonResponse({ error: citeErr }, 400);
+				}
+
+				await env.cforum_db
+					.prepare(
+						'UPDATE posts SET title = ?, content = ?, category_id = ?, cited_post_id = ? WHERE id = ?'
+					)
+					.bind(title.trim(), content.trim(), category_id, nextCitedId, postId)
+					.run();
 				
-				await security.logAudit(userPayload.id, 'UPDATE_POST', 'post', postId, { title_length: title.length }, request);
+				await security.logAudit(userPayload.id, 'UPDATE_POST', 'post', postId, {
+					title_length: title.length,
+					cited_post_id: nextCitedId
+				}, request);
 
 				return jsonResponse({ success: true });
 			} catch (e) {
@@ -3690,6 +3888,11 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				}
 
 				const { title, content: rawContent, category_id } = body;
+				const citedPostIdRaw = body?.cited_post_id;
+				const citedPostId =
+					citedPostIdRaw === null || citedPostIdRaw === undefined || citedPostIdRaw === ''
+						? null
+						: Number(citedPostIdRaw);
 				const isVisible = !(body?.is_visible === false || body?.is_visible === 0 || body?.visible === false || body?.visible === 0);
 				let content = rawContent;
 				
@@ -3750,7 +3953,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				// Validate Category + announcement restriction
 				const category = await env.cforum_db
 					.prepare(
-						`SELECT id, admin_only, IFNULL(status_options, '[]') AS status_options
+						`SELECT id, admin_only, IFNULL(status_options, '[]') AS status_options,
+							IFNULL(enable_cite, 0) AS enable_cite
 						 FROM categories WHERE id = ?`
 					)
 					.bind(category_id)
@@ -3759,6 +3963,11 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (category.admin_only && userPayload.role !== 'admin') {
 					return jsonResponse({ error: '该分类仅管理员可发帖' }, 403);
 				}
+				const citeErr = await validateCitedPostId(env.cforum_db, {
+					citedPostId: citedPostId != null && Number.isFinite(citedPostId) ? citedPostId : null,
+					sourceCategoryId: Number(category_id)
+				});
+				if (citeErr) return jsonResponse({ error: citeErr }, 400);
 				const statusOptions = parseStatusOptions(category.status_options);
 				const initialStatus = defaultStatusForOptions(statusOptions);
 
@@ -3768,10 +3977,12 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 							.toISOString()
 							.replace('T', ' ')
 							.slice(0, 19);
+				const resolvedCite =
+					citedPostId != null && Number.isFinite(citedPostId) ? citedPostId : null;
 				const { success } = await env.cforum_db
 					.prepare(
-						`INSERT INTO posts (author_id, title, content, category_id, is_visible, author_publish_until, status)
-						 VALUES (?, ?, ?, ?, ?, ?, ?)`
+						`INSERT INTO posts (author_id, title, content, category_id, is_visible, author_publish_until, status, cited_post_id)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 					)
 					.bind(
 						userPayload.id,
@@ -3780,7 +3991,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 						category_id,
 						isVisible ? 1 : 0,
 						authorPublishUntil,
-						initialStatus
+						initialStatus,
+						resolvedCite
 					)
 					.run();
 
@@ -3788,7 +4000,8 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 					title_length: safeTitle.length,
 					is_visible: isVisible,
 					author_publish_until: authorPublishUntil,
-					status: initialStatus
+					status: initialStatus,
+					cited_post_id: resolvedCite
 				}, request);
 
 				return jsonResponse({ success, author_publish_until: authorPublishUntil }, 201);

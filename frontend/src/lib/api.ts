@@ -23,10 +23,12 @@ export type Category = {
 	status_options?: string[];
 	/** 作者是否可修改自己帖子的状态 */
 	author_can_set_status?: number | boolean;
-	/** 本分类帖可挂出边「相关帖」 */
-	enable_relate_others?: number | boolean;
-	/** 本分类帖可展示被关联，且可作为关联目标 */
-	enable_linked_from?: number | boolean;
+	/** 本分类发帖时可携带引用 */
+	enable_cite?: number | boolean;
+	/** 本分类帖可被引用，并显示「引用发帖」 */
+	enable_cited_from?: number | boolean;
+	/** 本分类帖可参与管理员关联 */
+	enable_relate?: number | boolean;
 	created_at: string;
 };
 
@@ -56,12 +58,15 @@ export type Post = {
 	site_featured?: number;
 	/** 帖子状态（须属于所属分类 status_options） */
 	status?: string | null;
+	cited_post_id?: number | null;
+	cited_post?: RelatedPostCard | null;
+	cited_by_posts?: RelatedPostCard[];
 	category_status_options?: string[];
 	category_author_can_set_status?: number | boolean;
-	category_enable_relate_others?: number | boolean;
-	category_enable_linked_from?: number | boolean;
+	category_enable_cite?: number | boolean;
+	category_enable_cited_from?: number | boolean;
+	category_enable_relate?: number | boolean;
 	related_posts?: RelatedPostCard[];
-	linked_from_posts?: RelatedPostCard[];
 	view_count?: number;
 	created_at: string;
 	author_name?: string;

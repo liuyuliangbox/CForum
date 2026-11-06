@@ -77,8 +77,9 @@ export function AdminPage() {
 	const [newCategorySubtitle, setNewCategorySubtitle] = React.useState('');
 	const [newCategoryStatusOptionsText, setNewCategoryStatusOptionsText] = React.useState('');
 	const [newCategoryAuthorCanSetStatus, setNewCategoryAuthorCanSetStatus] = React.useState(false);
-	const [newCategoryEnableRelateOthers, setNewCategoryEnableRelateOthers] = React.useState(false);
-	const [newCategoryEnableLinkedFrom, setNewCategoryEnableLinkedFrom] = React.useState(false);
+	const [newCategoryEnableCite, setNewCategoryEnableCite] = React.useState(false);
+	const [newCategoryEnableCitedFrom, setNewCategoryEnableCitedFrom] = React.useState(false);
+	const [newCategoryEnableRelate, setNewCategoryEnableRelate] = React.useState(false);
 	const [editingCategoryId, setEditingCategoryId] = React.useState<number | null>(null);
 	const [editingCategoryName, setEditingCategoryName] = React.useState('');
 	const [editingCategoryAdminOnly, setEditingCategoryAdminOnly] = React.useState(false);
@@ -87,8 +88,9 @@ export function AdminPage() {
 	const [editingCategorySubtitle, setEditingCategorySubtitle] = React.useState('');
 	const [editingCategoryStatusOptionsText, setEditingCategoryStatusOptionsText] = React.useState('');
 	const [editingCategoryAuthorCanSetStatus, setEditingCategoryAuthorCanSetStatus] = React.useState(false);
-	const [editingCategoryEnableRelateOthers, setEditingCategoryEnableRelateOthers] = React.useState(false);
-	const [editingCategoryEnableLinkedFrom, setEditingCategoryEnableLinkedFrom] = React.useState(false);
+	const [editingCategoryEnableCite, setEditingCategoryEnableCite] = React.useState(false);
+	const [editingCategoryEnableCitedFrom, setEditingCategoryEnableCitedFrom] = React.useState(false);
+	const [editingCategoryEnableRelate, setEditingCategoryEnableRelate] = React.useState(false);
 
 	const [postTemplates, setPostTemplates] = React.useState<PostTemplate[]>([]);
 	const [tplName, setTplName] = React.useState('');
@@ -293,8 +295,9 @@ export function AdminPage() {
 					subtitle: newCategoryShowOnSite ? newCategorySubtitle : '',
 					status_options: textToStatusOptions(newCategoryStatusOptionsText),
 					author_can_set_status: newCategoryAuthorCanSetStatus,
-					enable_relate_others: newCategoryEnableRelateOthers,
-					enable_linked_from: newCategoryEnableLinkedFrom
+					enable_cite: newCategoryEnableCite,
+					enable_cited_from: newCategoryEnableCitedFrom,
+					enable_relate: newCategoryEnableRelate
 				})
 			});
 			setNewCategoryName('');
@@ -304,8 +307,9 @@ export function AdminPage() {
 			setNewCategorySubtitle('');
 			setNewCategoryStatusOptionsText('');
 			setNewCategoryAuthorCanSetStatus(false);
-			setNewCategoryEnableRelateOthers(false);
-			setNewCategoryEnableLinkedFrom(false);
+			setNewCategoryEnableCite(false);
+			setNewCategoryEnableCitedFrom(false);
+			setNewCategoryEnableRelate(false);
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -331,8 +335,9 @@ export function AdminPage() {
 					subtitle: editingCategoryShowOnSite ? editingCategorySubtitle : '',
 					status_options: textToStatusOptions(editingCategoryStatusOptionsText),
 					author_can_set_status: editingCategoryAuthorCanSetStatus,
-					enable_relate_others: editingCategoryEnableRelateOthers,
-					enable_linked_from: editingCategoryEnableLinkedFrom
+					enable_cite: editingCategoryEnableCite,
+					enable_cited_from: editingCategoryEnableCitedFrom,
+					enable_relate: editingCategoryEnableRelate
 				})
 			});
 			setEditingCategoryId(null);
@@ -343,8 +348,9 @@ export function AdminPage() {
 			setEditingCategorySubtitle('');
 			setEditingCategoryStatusOptionsText('');
 			setEditingCategoryAuthorCanSetStatus(false);
-			setEditingCategoryEnableRelateOthers(false);
-			setEditingCategoryEnableLinkedFrom(false);
+			setEditingCategoryEnableCite(false);
+			setEditingCategoryEnableCitedFrom(false);
+			setEditingCategoryEnableRelate(false);
 			await refresh();
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -974,19 +980,28 @@ export function AdminPage() {
 											<input
 												type="checkbox"
 												className="h-4 w-4"
-												checked={newCategoryEnableRelateOthers}
-												onChange={(e) => setNewCategoryEnableRelateOthers(e.target.checked)}
+												checked={newCategoryEnableCite}
+												onChange={(e) => setNewCategoryEnableCite(e.target.checked)}
 											/>
-											启用关联其他
+											可引用他人
 										</label>
 										<label className="flex items-center gap-2">
 											<input
 												type="checkbox"
 												className="h-4 w-4"
-												checked={newCategoryEnableLinkedFrom}
-												onChange={(e) => setNewCategoryEnableLinkedFrom(e.target.checked)}
+												checked={newCategoryEnableCitedFrom}
+												onChange={(e) => setNewCategoryEnableCitedFrom(e.target.checked)}
 											/>
-											启用被关联
+											可被引用
+										</label>
+										<label className="flex items-center gap-2">
+											<input
+												type="checkbox"
+												className="h-4 w-4"
+												checked={newCategoryEnableRelate}
+												onChange={(e) => setNewCategoryEnableRelate(e.target.checked)}
+											/>
+											启用关联
 										</label>
 									</div>
 								</div>
@@ -1069,19 +1084,28 @@ export function AdminPage() {
 															<input
 																type="checkbox"
 																className="h-4 w-4"
-																checked={editingCategoryEnableRelateOthers}
-																onChange={(e) => setEditingCategoryEnableRelateOthers(e.target.checked)}
+																checked={editingCategoryEnableCite}
+																onChange={(e) => setEditingCategoryEnableCite(e.target.checked)}
 															/>
-															启用关联其他
+															可引用他人
 														</label>
 														<label className="flex items-center gap-2">
 															<input
 																type="checkbox"
 																className="h-4 w-4"
-																checked={editingCategoryEnableLinkedFrom}
-																onChange={(e) => setEditingCategoryEnableLinkedFrom(e.target.checked)}
+																checked={editingCategoryEnableCitedFrom}
+																onChange={(e) => setEditingCategoryEnableCitedFrom(e.target.checked)}
 															/>
-															启用被关联
+															可被引用
+														</label>
+														<label className="flex items-center gap-2">
+															<input
+																type="checkbox"
+																className="h-4 w-4"
+																checked={editingCategoryEnableRelate}
+																onChange={(e) => setEditingCategoryEnableRelate(e.target.checked)}
+															/>
+															启用关联
 														</label>
 													</div>
 												</div>
@@ -1109,11 +1133,14 @@ export function AdminPage() {
 															{c.author_can_set_status ? ' · 作者可改' : ''}
 														</span>
 													) : null}
-													{c.enable_relate_others ? (
-														<span className="ml-2 text-xs text-violet-700 dark:text-violet-300">关联其他</span>
+													{c.enable_cite ? (
+														<span className="ml-2 text-xs text-violet-700 dark:text-violet-300">可引用</span>
 													) : null}
-													{c.enable_linked_from ? (
-														<span className="ml-2 text-xs text-violet-700 dark:text-violet-300">被关联</span>
+													{c.enable_cited_from ? (
+														<span className="ml-2 text-xs text-violet-700 dark:text-violet-300">可被引</span>
+													) : null}
+													{c.enable_relate ? (
+														<span className="ml-2 text-xs text-violet-700 dark:text-violet-300">关联</span>
 													) : null}
 												</span>
 											)}
@@ -1136,8 +1163,9 @@ export function AdminPage() {
 																setEditingCategorySubtitle('');
 																setEditingCategoryStatusOptionsText('');
 																setEditingCategoryAuthorCanSetStatus(false);
-																setEditingCategoryEnableRelateOthers(false);
-																setEditingCategoryEnableLinkedFrom(false);
+																setEditingCategoryEnableCite(false);
+																setEditingCategoryEnableCitedFrom(false);
+																setEditingCategoryEnableRelate(false);
 															}}
 														>
 															取消
@@ -1177,8 +1205,9 @@ export function AdminPage() {
 																setEditingCategorySubtitle(String(c.subtitle || ''));
 																setEditingCategoryStatusOptionsText(statusOptionsToText(c.status_options));
 																setEditingCategoryAuthorCanSetStatus(!!c.author_can_set_status);
-																setEditingCategoryEnableRelateOthers(!!c.enable_relate_others);
-																setEditingCategoryEnableLinkedFrom(!!c.enable_linked_from);
+																setEditingCategoryEnableCite(!!c.enable_cite);
+																setEditingCategoryEnableCitedFrom(!!c.enable_cited_from);
+																setEditingCategoryEnableRelate(!!c.enable_relate);
 															}}
 														>
 															编辑

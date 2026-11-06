@@ -19,7 +19,8 @@ import {
 	getSecurityHeaders,
 	type Category,
 	type Post,
-	type PostTemplate
+	type PostTemplate,
+	type RelatedPostCard
 } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
 import { attachFancybox, highlightCodeBlocks, renderMarkdownToHtml } from '@/lib/markdown';
@@ -66,6 +67,7 @@ export function IndexPage() {
 	const [createOpen, setCreateOpen] = React.useState(false);
 	const [createLoading, setCreateLoading] = React.useState(false);
 	const [createError, setCreateError] = React.useState('');
+	const [citeSource, setCiteSource] = React.useState<RelatedPostCard | null>(null);
 	const [uploadLoading, setUploadLoading] = React.useState(false);
 	const [uploadError, setUploadError] = React.useState('');
 	const [turnstileToken, setTurnstileToken] = React.useState('');
@@ -152,6 +154,49 @@ export function IndexPage() {
 			setCategories([]);
 		}
 	}, []);
+
+	React.useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const citeId = params.get('cite');
+		if (!citeId || !/^\d+$/.test(citeId)) return;
+		let cancelled = false;
+		(async () => {
+			try {
+				const p = await apiFetch<Post>(`/posts/${citeId}`, { headers: getSecurityHeaders('GET', null) });
+				if (cancelled) return;
+				if (!p.category_enable_cited_from) {
+					setCreateError('该帖所在分类未启用被引用');
+					return;
+				}
+				setCiteSource({
+					id: p.id,
+					title: p.title,
+					status: p.status,
+					category_id: p.category_id,
+					category_name: p.category_name,
+					author_name: p.author_name
+				});
+				setCreateOpen(true);
+				const url = new URL(window.location.href);
+				url.searchParams.delete('cite');
+				window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+				requestAnimationFrame(() => {
+					document.getElementById('compose')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				});
+			} catch (e: any) {
+				if (!cancelled) setCreateError(String(e?.message || e));
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	const selectedCreateCategory = React.useMemo(
+		() => categories.find((c) => String(c.id) === newCategoryId) || null,
+		[categories, newCategoryId]
+	);
+	const citeBlockedByCategory = !!citeSource && !!selectedCreateCategory && !selectedCreateCategory.enable_cite;
 
 	const fetchPosts = React.useCallback(
 		async (offset: number) => {
@@ -448,6 +493,9 @@ export function IndexPage() {
 		if (newTitle.length > 30) return setCreateError('标题过长 (最多 30 字符)');
 		if (newContent.length > 3000) return setCreateError('内容过长 (最多 3000 字符)');
 		if (turnstileActive && !turnstileToken) return setCreateError('请完成验证码验证');
+		if (citeSource && selectedCreateCategory && !selectedCreateCategory.enable_cite) {
+			return setCreateError('当前分类未启用「可引用他人」，请更换分类或取消引用');
+		}
 
 		setCreateLoading(true);
 		try {
@@ -459,6 +507,7 @@ export function IndexPage() {
 					content: newContent,
 					category_id: Number(newCategoryId),
 					is_visible: newVisible,
+					cited_post_id: citeSource?.id ?? null,
 					'cf-turnstile-response': turnstileToken
 				})
 			});
@@ -466,6 +515,7 @@ export function IndexPage() {
 			setNewContent('');
 			setNewCategoryId('');
 			setNewVisible(true);
+			setCiteSource(null);
 			setTurnstileToken('');
 			setTurnstileResetKey((v) => v + 1);
 			setCreateOpen(false);
@@ -774,9 +824,34 @@ export function IndexPage() {
 							</button>
 						</CardHeader>
 						{createOpen ? (
-						<CardContent>
+						<CardContent id="compose">
 								<form className="space-y-4" onSubmit={createPost}>
 								{createError ? <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">{createError}</div> : null}
+								{citeSource ? (
+									<div className="rounded-md border bg-muted/30 p-3 text-sm">
+										<div className="mb-1 flex items-center justify-between gap-2">
+											<span className="text-xs font-medium text-muted-foreground">引用来源（每帖最多 1 个）</span>
+											<button
+												type="button"
+												className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+												onClick={() => setCiteSource(null)}
+											>
+												取消引用
+											</button>
+										</div>
+										<a href={`/post?id=${citeSource.id}`} className="font-medium hover:underline">
+											{citeSource.title}
+										</a>
+										<div className="mt-1 text-xs text-muted-foreground">
+											{[citeSource.category_name, citeSource.author_name].filter(Boolean).join(' · ')}
+										</div>
+										{citeBlockedByCategory ? (
+											<div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+												当前所选分类未开启「可引用他人」，请更换分类后再发。
+											</div>
+										) : null}
+									</div>
+								) : null}
 								<div className="space-y-4">
 									<div className="space-y-2">
 										<Label htmlFor="new-title">标题</Label>

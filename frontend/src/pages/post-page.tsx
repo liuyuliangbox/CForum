@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowLeft, Eye, EyeOff, Heart, Link2, MoreVertical, Pin, Pencil, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Heart, Link2, MoreVertical, Pin, Pencil, Quote, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
 
 import { AdminCooldownMenuItems, AdminCooldownTrigger } from '@/components/admin-cooldown-menu';
 import { MarkdownToolbar } from '@/components/markdown-toolbar';
@@ -136,6 +136,12 @@ export function PostPage() {
 	const [relationSearchLoading, setRelationSearchLoading] = React.useState(false);
 	const [relationSaving, setRelationSaving] = React.useState(false);
 	const [relationError, setRelationError] = React.useState('');
+	const [citeEditOpen, setCiteEditOpen] = React.useState(false);
+	const [citeSearch, setCiteSearch] = React.useState('');
+	const [citeSearchResults, setCiteSearchResults] = React.useState<Post[]>([]);
+	const [citeSearchLoading, setCiteSearchLoading] = React.useState(false);
+	const [citeSaving, setCiteSaving] = React.useState(false);
+	const [citeError, setCiteError] = React.useState('');
 	const [publishNowMs, setPublishNowMs] = React.useState(() => Date.now());
 	const needsPublishTick =
 		!!user &&
@@ -484,10 +490,10 @@ export function PostPage() {
 		setRelationError('');
 		try {
 			const linkableCategoryIds = new Set(
-				allCategories.filter((c) => !!c.enable_linked_from).map((c) => c.id)
+				allCategories.filter((c) => !!c.enable_relate).map((c) => c.id)
 			);
 			const data = await apiFetch<{ posts: Post[] }>(
-				`/posts?limit=20&offset=0&search=${encodeURIComponent(q)}`,
+				`/posts?limit=20&offset=0&q=${encodeURIComponent(q)}`,
 				{ headers: getSecurityHeaders('GET', null) }
 			);
 			setRelationSearchResults(
@@ -501,6 +507,65 @@ export function PostPage() {
 			setRelationError(String(e?.message || e));
 		} finally {
 			setRelationSearchLoading(false);
+		}
+	}
+
+	function goCiteCompose() {
+		if (!post || !user) {
+			window.location.href = '/login';
+			return;
+		}
+		window.location.href = `/?cite=${post.id}`;
+	}
+
+	async function searchCiteTargets() {
+		if (!post) return;
+		const q = citeSearch.trim();
+		if (!q) {
+			setCiteSearchResults([]);
+			return;
+		}
+		setCiteSearchLoading(true);
+		setCiteError('');
+		try {
+			const citableIds = new Set(
+				allCategories.filter((c) => !!c.enable_cited_from).map((c) => c.id)
+			);
+			const data = await apiFetch<{ posts: Post[] }>(
+				`/posts?limit=20&offset=0&q=${encodeURIComponent(q)}`,
+				{ headers: getSecurityHeaders('GET', null) }
+			);
+			setCiteSearchResults(
+				(data.posts || []).filter(
+					(p) =>
+						p.id !== post.id &&
+						(p.category_id == null || citableIds.has(Number(p.category_id)))
+				)
+			);
+		} catch (e: any) {
+			setCiteError(String(e?.message || e));
+		} finally {
+			setCiteSearchLoading(false);
+		}
+	}
+
+	async function saveCite(citedPostId: number | null) {
+		if (!post) return;
+		setCiteSaving(true);
+		setCiteError('');
+		try {
+			await apiFetch(`/posts/${post.id}/cite`, {
+				method: 'PUT',
+				headers: getSecurityHeaders('PUT'),
+				body: JSON.stringify({ cited_post_id: citedPostId })
+			});
+			setCiteEditOpen(false);
+			setAdminMenuOpen(false);
+			await refresh();
+		} catch (e: any) {
+			setCiteError(String(e?.message || e));
+		} finally {
+			setCiteSaving(false);
 		}
 	}
 
@@ -713,6 +778,19 @@ export function PostPage() {
 										<span className="sr-only">观看数</span>
 									</span>
 
+									{!!post.category_enable_cited_from ? (
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => goCiteCompose()}
+											disabled={!user}
+											title={user ? '引用此帖发新帖' : '登录后可引用发帖'}
+										>
+											<Quote className="h-4 w-4" />
+											引用发帖
+										</Button>
+									) : null}
+
 									{user &&
 									(user.role === 'admin' ||
 										(user.id === post.author_id && Number(post.is_visible ?? 1) === 0)) ? (
@@ -782,7 +860,7 @@ export function PostPage() {
 															{post.is_pinned ? '取消置顶' : '置顶'}
 														</button>
 													) : null}
-													{user.role === 'admin' && !!post.category_enable_relate_others ? (
+													{user.role === 'admin' && !!post.category_enable_relate ? (
 														<button
 															type="button"
 															className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
@@ -790,6 +868,23 @@ export function PostPage() {
 														>
 															<Link2 className="h-4 w-4" />
 															管理关联
+														</button>
+													) : null}
+													{user.role === 'admin' &&
+													(!!post.category_enable_cite || !!post.cited_post_id) ? (
+														<button
+															type="button"
+															className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+															onClick={() => {
+																setCiteEditOpen(true);
+																setCiteSearch('');
+																setCiteSearchResults([]);
+																setCiteError('');
+																setAdminMenuOpen(false);
+															}}
+														>
+															<Quote className="h-4 w-4" />
+															管理引用
 														</button>
 													) : null}
 													{user.role === 'admin' || Number(post.site_featured ?? 0) !== 1 ? (
@@ -929,7 +1024,119 @@ export function PostPage() {
 							</CardContent>
 						</Card>
 
-						{!!post.category_enable_relate_others &&
+						{post.cited_post ? (
+							<Card>
+								<CardHeader className="flex flex-row items-center justify-between space-y-0">
+									<CardTitle className="text-base">引用来源</CardTitle>
+									{user?.role === 'admin' ? (
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => {
+												setCiteEditOpen(true);
+												setCiteError('');
+											}}
+										>
+											管理
+										</Button>
+									) : null}
+								</CardHeader>
+								<CardContent>{renderRelationCards([post.cited_post])}</CardContent>
+							</Card>
+						) : null}
+
+						{!!post.category_enable_cited_from &&
+						post.cited_by_posts &&
+						post.cited_by_posts.length > 0 ? (
+							<Card>
+								<CardHeader>
+									<CardTitle className="text-base">被引用</CardTitle>
+								</CardHeader>
+								<CardContent>{renderRelationCards(post.cited_by_posts)}</CardContent>
+							</Card>
+						) : null}
+
+						{citeEditOpen && user?.role === 'admin' ? (
+							<Card>
+								<CardHeader className="flex flex-row items-center justify-between space-y-0">
+									<CardTitle className="text-base">管理引用（最多 1 个）</CardTitle>
+									<Button variant="ghost" size="sm" onClick={() => setCiteEditOpen(false)}>
+										<X className="h-4 w-4" />
+										<span className="sr-only">关闭</span>
+									</Button>
+								</CardHeader>
+								<CardContent className="space-y-3">
+									{citeError ? (
+										<div className="rounded-md border border-destructive/50 bg-destructive/5 p-2 text-sm text-destructive">
+											{citeError}
+										</div>
+									) : null}
+									{post.cited_post ? (
+										<div className="rounded-md border bg-muted/20 p-3 text-sm">
+											<div className="text-xs text-muted-foreground">当前引用</div>
+											<div className="font-medium">{post.cited_post.title}</div>
+										</div>
+									) : (
+										<div className="text-sm text-muted-foreground">当前无引用</div>
+									)}
+									<div className="flex flex-wrap gap-2">
+										<Input
+											value={citeSearch}
+											placeholder="搜索可被引用的帖子标题"
+											className="max-w-sm"
+											onChange={(e) => setCiteSearch(e.target.value)}
+											onKeyDown={(e) => {
+												if (e.key === 'Enter') {
+													e.preventDefault();
+													void searchCiteTargets();
+												}
+											}}
+										/>
+										<Button
+											variant="outline"
+											disabled={citeSearchLoading}
+											onClick={() => void searchCiteTargets()}
+										>
+											{citeSearchLoading ? '搜索中…' : '搜索'}
+										</Button>
+									</div>
+									{citeSearchResults.length ? (
+										<div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
+											{citeSearchResults.map((p) => (
+												<button
+													key={p.id}
+													type="button"
+													className="flex w-full items-start justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+													disabled={citeSaving}
+													onClick={() => void saveCite(p.id)}
+												>
+													<span className="line-clamp-2">{p.title}</span>
+													<span className="shrink-0 text-xs text-muted-foreground">
+														{p.category_name || '设为引用'}
+													</span>
+												</button>
+											))}
+										</div>
+									) : null}
+									<div className="flex gap-2">
+										{post.cited_post_id ? (
+											<Button
+												variant="outline"
+												disabled={citeSaving}
+												onClick={() => void saveCite(null)}
+											>
+												{citeSaving ? '处理中…' : '清除引用'}
+											</Button>
+										) : null}
+										<Button variant="outline" onClick={() => setCiteEditOpen(false)}>
+											关闭
+										</Button>
+									</div>
+								</CardContent>
+							</Card>
+						) : null}
+
+						{!!post.category_enable_relate &&
 						((post.related_posts && post.related_posts.length > 0) ||
 							(user?.role === 'admin' && relationsOpen)) ? (
 							<Card>
@@ -951,18 +1158,7 @@ export function PostPage() {
 							</Card>
 						) : null}
 
-						{!!post.category_enable_linked_from &&
-						post.linked_from_posts &&
-						post.linked_from_posts.length > 0 ? (
-							<Card>
-								<CardHeader>
-									<CardTitle className="text-base">被关联自</CardTitle>
-								</CardHeader>
-								<CardContent>{renderRelationCards(post.linked_from_posts)}</CardContent>
-							</Card>
-						) : null}
-
-						{relationsOpen && user?.role === 'admin' && !!post.category_enable_relate_others ? (
+						{relationsOpen && user?.role === 'admin' && !!post.category_enable_relate ? (
 							<Card>
 								<CardHeader className="flex flex-row items-center justify-between space-y-0">
 									<CardTitle className="text-base">管理关联（最多 10 个）</CardTitle>
@@ -980,7 +1176,7 @@ export function PostPage() {
 									<div className="flex flex-wrap gap-2">
 										<Input
 											value={relationSearch}
-											placeholder="搜索可被关联的帖子标题"
+											placeholder="搜索可关联的帖子标题"
 											className="max-w-sm"
 											onChange={(e) => setRelationSearch(e.target.value)}
 											onKeyDown={(e) => {
@@ -1059,7 +1255,7 @@ export function PostPage() {
 						) : null}
 
 						{user?.role === 'admin' &&
-						!!post.category_enable_relate_others &&
+						!!post.category_enable_relate &&
 						!(post.related_posts && post.related_posts.length > 0) &&
 						!relationsOpen ? (
 							<div className="flex justify-end">
