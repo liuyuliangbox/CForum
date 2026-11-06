@@ -134,8 +134,12 @@ export function isPostUnlocked(postId: string | number): boolean {
 	return readJsonArray(KEYS.unlocked).includes(String(postId));
 }
 
-/** Dismiss soft prompt: +1 soft count, reset interest counters; may arm hard gate. */
-export function dismissSoftPrompt(thresholds: GuestGateThresholds): GatePrompt {
+/**
+ * Dismiss soft prompt: +1 soft count, reset interest counters.
+ * Arms hard silently when soft-times reached — do NOT open hard modal here
+ * (hard shows on next browse action: paginate / open another post).
+ */
+export function dismissSoftPrompt(thresholds: GuestGateThresholds): void {
 	const count = readInt(KEYS.softCount) + 1;
 	writeInt(KEYS.softCount, count);
 	writeJsonArray(KEYS.views, []);
@@ -143,9 +147,7 @@ export function dismissSoftPrompt(thresholds: GuestGateThresholds): GatePrompt {
 	writeFlag(KEYS.softShown, false);
 	if (count >= thresholds.softTimes) {
 		writeFlag(KEYS.hard, true);
-		return 'hard';
 	}
-	return 'none';
 }
 
 /** Record a unique post view; returns whether thresholds suggest a prompt. */

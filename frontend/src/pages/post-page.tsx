@@ -1615,8 +1615,8 @@ export function PostPage() {
 					open
 					nextPath={currentPageAsNext()}
 					onDismissSoft={() => {
-						const next = dismissSoftPrompt(gateThresholds);
-						setGatePrompt(next === 'hard' ? 'hard' : null);
+						dismissSoftPrompt(gateThresholds);
+						setGatePrompt(null);
 					}}
 				/>
 			) : null}
