@@ -371,7 +371,9 @@ export function AdminPage() {
 			await apiFetch(`/admin/categories/${id}`, { method: 'DELETE', headers: getSecurityHeaders('DELETE') });
 			await refresh();
 		} catch (e: any) {
-			setError(String(e?.message || e));
+			const msg = String(e?.message || e);
+			setError(msg);
+			alert(msg);
 		} finally {
 			setLoading(false);
 		}

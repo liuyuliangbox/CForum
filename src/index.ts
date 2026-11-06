@@ -2423,7 +2423,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				// Check if there are posts in this category
 				const count = await env.cforum_db.prepare('SELECT COUNT(*) as count FROM posts WHERE category_id = ?').bind(id).first<number>('count');
 				if ((count ?? 0) > 0) {
-					return jsonResponse({ error: 'Cannot delete category with existing posts' }, 400);
+					return jsonResponse({ error: '该分类下仍有帖子，无法删除。请先将帖子移到其他分类或删除后再试。' }, 400);
 				}
 				
 				await env.cforum_db.prepare('DELETE FROM categories WHERE id = ?').bind(id).run();
