@@ -52,42 +52,44 @@ export function GuestGateDialog({
 				onEscapeKeyDown={(e) => {
 					if (hard) e.preventDefault();
 				}}
-				className={cn(
-					'max-w-md overflow-hidden border-0 p-0 shadow-2xl',
-					'bg-gradient-to-br from-background via-background to-sky-500/10 dark:to-indigo-500/15'
-				)}
+				className="max-w-md gap-0 overflow-hidden border border-border/80 bg-background p-0 shadow-lg"
 			>
 				<div
 					className={cn(
-						'h-1.5 w-full',
+						'h-1 w-full',
 						hard
-							? 'bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500'
-							: 'bg-gradient-to-r from-cyan-500 via-sky-500 to-indigo-600'
+							? 'bg-gradient-to-r from-amber-400 via-orange-400 to-rose-400'
+							: 'bg-gradient-to-r from-cyan-400 via-sky-500 to-indigo-500'
 					)}
 					aria-hidden
 				/>
-				<div className="space-y-5 p-6 pt-5">
-					<DialogHeader className="space-y-3 text-left">
-						<p className="text-[11px] font-medium uppercase tracking-[0.18em] text-sky-700/80 dark:text-sky-300/80">
+				<div className="space-y-5 bg-background p-6 pt-5">
+					<DialogHeader className="space-y-2 text-left">
+						<p
+							className={cn(
+								'text-[11px] font-medium tracking-[0.16em]',
+								hard ? 'text-orange-600 dark:text-orange-300' : 'text-sky-600 dark:text-sky-300'
+							)}
+						>
 							{hard ? '继续探索' : '加入社区'}
 						</p>
-						<DialogTitle className="text-xl leading-snug sm:text-2xl">
+						<DialogTitle className="text-xl leading-snug tracking-tight sm:text-2xl">
 							{hard ? '登录后继续浏览社区' : '看起来你对社区挺感兴趣'}
 						</DialogTitle>
 						<DialogDescription className="text-sm leading-relaxed text-muted-foreground">
 							注册后可跟进反馈进度、参与讨论，并发布你的体验与建议。
 						</DialogDescription>
 					</DialogHeader>
-					<DialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">
+					<DialogFooter className="flex flex-col gap-2.5 space-x-0 sm:flex-col sm:space-x-0">
 						<a
 							href={registerHref}
-							className="inline-flex h-11 w-full items-center justify-center rounded-md bg-gradient-to-r from-cyan-500 via-sky-500 to-indigo-600 text-sm font-semibold text-white shadow-md shadow-sky-500/25 transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/60"
+							className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-gradient-to-r from-cyan-500 via-sky-500 to-indigo-600 text-sm font-semibold text-white transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50"
 						>
 							免费注册
 						</a>
 						<a
 							href={loginHref}
-							className="inline-flex h-11 w-full items-center justify-center rounded-md bg-gradient-to-r from-slate-800 to-slate-600 text-sm font-medium text-white shadow-md shadow-slate-900/20 transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:shadow-none"
+							className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-sky-500/30 bg-gradient-to-r from-sky-500/10 to-indigo-500/10 text-sm font-medium text-sky-800 transition hover:from-sky-500/15 hover:to-indigo-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40 dark:text-sky-100"
 						>
 							已有账号登录
 						</a>
@@ -95,7 +97,7 @@ export function GuestGateDialog({
 							<button
 								type="button"
 								onClick={dismissOnce}
-								className="inline-flex h-10 w-full items-center justify-center rounded-md text-sm text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+								className="inline-flex h-10 w-full items-center justify-center rounded-lg text-sm text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
 							>
 								稍后再看
 							</button>
