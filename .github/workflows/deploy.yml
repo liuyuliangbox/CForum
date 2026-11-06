@@ -78,15 +78,36 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+      # Deploy first; secrets are uploaded separately with retries so a transient
+      # Cloudflare 503 on secret bulk (GET .../settings) does not block the release.
       - name: Deploy to Cloudflare Workers and Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           command: deploy --env=""
-          secrets: |
-            JWT_SECRET
+
+      - name: Upload JWT_SECRET
+        run: |
+          set -euo pipefail
+          if [ -z "${JWT_SECRET:-}" ]; then
+            echo "❌ JWT_SECRET GitHub secret is empty"
+            exit 1
+          fi
+          for attempt in 1 2 3 4 5; do
+            echo "🔐 Uploading JWT_SECRET (attempt ${attempt}/5)..."
+            if printf '%s' "$JWT_SECRET" | npx wrangler secret put JWT_SECRET --env=""; then
+              echo "✅ JWT_SECRET uploaded"
+              exit 0
+            fi
+            echo "⚠️ secret put failed; waiting before retry..."
+            sleep $((attempt * 15))
+          done
+          echo "❌ Failed to upload JWT_SECRET after retries"
+          exit 1
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
       - name: Resolve Worker URL for Pages proxy
