@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { apiFetch, getSecurityHeaders } from '@/lib/api';
 import { getUser, logout, setUser, type User } from '@/lib/auth';
+import { cn } from '@/lib/utils';
 import { validateText } from '@/lib/validators';
 
 export function SettingsPage() {
@@ -19,6 +20,7 @@ export function SettingsPage() {
 
 	const [username, setUsername] = React.useState(user?.username || '');
 	const [avatarUrl, setAvatarUrl] = React.useState(user?.avatar_url || '');
+	const [presets, setPresets] = React.useState<string[]>([]);
 	const [emailNotifications, setEmailNotifications] = React.useState<boolean>(user?.email_notifications !== false);
 
 	const [emailNew, setEmailNew] = React.useState('');
@@ -43,13 +45,37 @@ export function SettingsPage() {
 		QRCode.toCanvas(qrCanvasRef.current, totpUri).catch(() => {});
 	}, [totpUri]);
 
+	React.useEffect(() => {
+		let cancelled = false;
+		(async () => {
+			try {
+				const data = await apiFetch<{ presets: string[] }>('/preset-avatars');
+				if (cancelled) return;
+				const list = Array.isArray(data.presets) ? data.presets : [];
+				setPresets(list);
+				if (list.length && avatarUrl && !list.includes(avatarUrl)) {
+					// keep current until user picks; do not auto-overwrite
+				} else if (list.length && !avatarUrl) {
+					setAvatarUrl(list[0]);
+				}
+			} catch {
+				/* ignore */
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
+	}, []);
+
 	async function saveProfile() {
 		if (!user) return;
 		setError('');
 		const err = username ? validateText(username, '用户名') : null;
 		if (err) return setError(err);
 		if (username.length > 20) return setError('用户名过长 (最多 20 字符)');
-		if (avatarUrl && avatarUrl.length > 500) return setError('头像 URL 过长 (最多 500 字符)');
+		if (!avatarUrl) return setError('请选择一个预设头像');
+		if (presets.length && !presets.includes(avatarUrl)) return setError('请从预设头像中选择');
 
 		setLoading(true);
 		try {
@@ -65,33 +91,6 @@ export function SettingsPage() {
 			setUser(data.user);
 			setUserState(data.user);
 			alert('资料已更新');
-		} catch (e: any) {
-			setError(String(e?.message || e));
-		} finally {
-			setLoading(false);
-		}
-	}
-
-	async function uploadAvatar(file: File) {
-		if (!user) return;
-		setError('');
-		// allow larger avatar images (2MB)
-		if (file.size > 2 * 1024 * 1024) return setError('文件过大 (最大 2MB)');
-
-		const formData = new FormData();
-		formData.append('file', file);
-		formData.append('type', 'avatar');
-
-		setLoading(true);
-		try {
-			const res = await fetch('/api/upload', {
-				method: 'POST',
-				headers: getSecurityHeaders('POST', null),
-				body: formData
-			});
-			const data = (await res.json()) as any;
-			if (!res.ok) throw new Error(data?.error || '上传失败');
-			setAvatarUrl(data.url);
 		} catch (e: any) {
 			setError(String(e?.message || e));
 		} finally {
@@ -209,29 +208,39 @@ export function SettingsPage() {
 						<CardTitle>个人资料</CardTitle>
 					</CardHeader>
 					<CardContent className="space-y-4">
-						<div className="grid gap-4 sm:grid-cols-2">
-							<div className="space-y-2">
-								<Label htmlFor="profile-username">用户名</Label>
-								<Input id="profile-username" value={username} onChange={(e) => setUsername(e.target.value)} maxLength={20} />
-							</div>
-							<div className="space-y-2">
-								<Label htmlFor="profile-avatar">头像 URL</Label>
-								<Input id="profile-avatar" value={avatarUrl || ''} onChange={(e) => setAvatarUrl(e.target.value)} />
-							</div>
+						<div className="space-y-2">
+							<Label htmlFor="profile-username">用户名</Label>
+							<Input id="profile-username" value={username} onChange={(e) => setUsername(e.target.value)} maxLength={20} />
+							<p className="text-xs text-muted-foreground">修改用户名会走内容审查（敏感词等）。</p>
 						</div>
 
 						<div className="space-y-2">
-							<Label htmlFor="avatar-file">上传头像 (最大 500KB)</Label>
-							<Input
-								id="avatar-file"
-								type="file"
-								accept="image/*"
-								onChange={(e) => {
-									const f = e.target.files?.[0];
-									if (f) uploadAvatar(f);
-									e.target.value = '';
-								}}
-							/>
+							<Label>头像（仅可选预设）</Label>
+							<div className="flex flex-wrap gap-2">
+								{presets.map((url) => {
+									const selected = avatarUrl === url;
+									return (
+										<button
+											key={url}
+											type="button"
+											onClick={() => setAvatarUrl(url)}
+											className={cn(
+												'rounded-md border-2 p-0.5 transition',
+												selected ? 'border-primary' : 'border-transparent hover:border-muted-foreground/40'
+											)}
+											title="选择此头像"
+										>
+											<img src={url} alt="" className="h-12 w-12 rounded-md bg-muted object-cover" />
+										</button>
+									);
+								})}
+							</div>
+							{!presets.length ? <p className="text-xs text-muted-foreground">正在加载预设头像…</p> : null}
+							{avatarUrl && presets.length && !presets.includes(avatarUrl) ? (
+								<p className="text-xs text-amber-700 dark:text-amber-400">
+									当前头像不在预设列表中，请重新选择一个预设后再保存。
+								</p>
+							) : null}
 						</div>
 
 						<label className="flex items-center gap-2 text-sm">

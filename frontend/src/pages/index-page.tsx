@@ -60,9 +60,7 @@ export function IndexPage() {
 	const [newCategoryId, setNewCategoryId] = React.useState<string>('');
 	const [newVisible, setNewVisible] = React.useState(true);
 	const [createTemplates, setCreateTemplates] = React.useState<PostTemplate[]>([]);
-	const [previewOpen, setPreviewOpen] = React.useState(() =>
-		typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : false
-	);
+	const [previewOpen, setPreviewOpen] = React.useState(true);
 	const [categoriesOpen, setCategoriesOpen] = React.useState(true);
 	const [createOpen, setCreateOpen] = React.useState(false);
 	const [createLoading, setCreateLoading] = React.useState(false);
@@ -108,27 +106,31 @@ export function IndexPage() {
 
 	async function handleImageFile(file: File) {
 		setUploadError('');
-		if (file.size > 2 * 1024 * 1024) {
-			setUploadError('文件过大 (最大 2MB)');
-			return;
-		}
 		setUploadLoading(true);
 		try {
-			const formData = new FormData();
-			formData.append('file', file);
-			formData.append('type', 'post');
-			const res = await fetch('/api/upload', {
-				method: 'POST',
-				headers: getSecurityHeaders('POST', null),
-				body: formData
-			});
-			const data = await res.json();
-			if (!res.ok) throw new Error(data?.error || '上传失败');
+			const { uploadPostImage } = await import('@/lib/editor-image');
+			const url = await uploadPostImage(file);
 			insertIntoContent(`
 
-![](${data.url})
+![](${url})
 
 `);
+			setPreviewOpen(true);
+		} catch (err: any) {
+			setUploadError(String(err?.message || err));
+		} finally {
+			setUploadLoading(false);
+		}
+	}
+
+	async function onContentPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+		try {
+			const { handleEditorImagePaste } = await import('@/lib/editor-image');
+			const md = await handleEditorImagePaste(e);
+			if (!md) return;
+			setUploadError('');
+			setUploadLoading(true);
+			insertIntoContent(md);
 			setPreviewOpen(true);
 		} catch (err: any) {
 			setUploadError(String(err?.message || err));
@@ -965,6 +967,7 @@ export function IndexPage() {
 												ref={newContentRef}
 												value={newContent}
 												onChange={(e) => setNewContent(e.target.value)}
+												onPaste={(e) => void onContentPaste(e)}
 												onKeyDown={(e) =>
 													handleMarkdownEditorKeyDown(e, {
 														isAdmin: !!isAdminEditor,

@@ -95,27 +95,32 @@ export function PostPage() {
 	async function handleEditImageFile(file: File) {
 		setUploadError('');
 		setEditError('');
-		if (file.size > 2 * 1024 * 1024) {
-			setEditError('文件过大 (最大 2MB)');
-			return;
-		}
 		setUploadLoading(true);
 		try {
-			const formData = new FormData();
-			formData.append('file', file);
-			formData.append('type', 'post');
-			const res = await fetch('/api/upload', {
-				method: 'POST',
-				headers: getSecurityHeaders('POST', null),
-				body: formData
-			});
-			const data = await res.json();
-			if (!res.ok) throw new Error(data?.error || '上传失败');
+			const { uploadPostImage } = await import('@/lib/editor-image');
+			const url = await uploadPostImage(file);
 			insertIntoEditContent(`
 
-![](${data.url})
+![](${url})
 
 `);
+			setEditPreviewOpen(true);
+		} catch (err: any) {
+			setEditError(String(err?.message || err));
+		} finally {
+			setUploadLoading(false);
+		}
+	}
+
+	async function onEditContentPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+		try {
+			const { handleEditorImagePaste } = await import('@/lib/editor-image');
+			const md = await handleEditorImagePaste(e);
+			if (!md) return;
+			setUploadError('');
+			setEditError('');
+			setUploadLoading(true);
+			insertIntoEditContent(md);
 			setEditPreviewOpen(true);
 		} catch (err: any) {
 			setEditError(String(err?.message || err));
@@ -1095,6 +1100,7 @@ export function PostPage() {
 													ref={editContentRef}
 													value={editContent}
 													onChange={(e) => setEditContent(e.target.value)}
+													onPaste={(e) => void onEditContentPaste(e)}
 													onKeyDown={(e) =>
 														handleMarkdownEditorKeyDown(e, {
 															isAdmin: !!isAdminEditor,

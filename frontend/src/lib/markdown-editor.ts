@@ -168,8 +168,9 @@ export function handleMarkdownEditorKeyDown(
 		apply(runMarkdownAction(text, start, end, action));
 	};
 
-	// 删除线：Alt+Shift+5（不依赖 Ctrl）
+	// 删除线：Alt+Shift+5（管理员）
 	if (e.altKey && shift && e.code === 'Digit5') {
+		if (!isAdmin) return;
 		run('strike');
 		return;
 	}
@@ -183,40 +184,36 @@ export function handleMarkdownEditorKeyDown(
 		return;
 	}
 	if (!shift && key === 'i') {
-		if (!isAdmin) return;
 		run('italic');
 		return;
 	}
 	if (!shift && key === 'k') {
-		if (!isAdmin) return;
 		run('link');
 		return;
 	}
 	if (!shift && key === 'u') {
-		if (!isAdmin) return;
 		run('underline');
 		return;
 	}
 	if (!shift && key === 't') {
-		if (!isAdmin) return;
 		run('table');
 		return;
 	}
 	if (!shift && key === '2') {
+		if (!isAdmin) return;
 		run('h2');
 		return;
 	}
 	if (!shift && key === '3') {
+		if (!isAdmin) return;
 		run('h3');
 		return;
 	}
 	if (shift && key === 'k') {
-		if (!isAdmin) return;
 		run('codeBlock');
 		return;
 	}
 	if (shift && key === 'm') {
-		if (!isAdmin) return;
 		run('formula');
 		return;
 	}
@@ -233,15 +230,16 @@ export function handleMarkdownEditorKeyDown(
 		return;
 	}
 	if (!shift && key === '[') {
+		if (!isAdmin) return;
 		run('outdent');
 		return;
 	}
 	if (!shift && key === ']') {
+		if (!isAdmin) return;
 		run('indent');
 		return;
 	}
 	if (shift && (e.code === 'Backquote' || key === '`')) {
-		if (!isAdmin) return;
 		run('inlineCode');
 	}
 }

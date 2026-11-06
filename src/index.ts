@@ -189,7 +189,40 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 20;
+
+const DEFAULT_AVATAR_PRESET_COUNT = 12;
+const DEFAULT_AVATAR_PRESETS = Array.from(
+	{ length: DEFAULT_AVATAR_PRESET_COUNT },
+	(_, i) => `/api/preset-avatars/${i + 1}`
+);
+
+function parseAvatarPresets(raw: unknown): string[] {
+	let list: unknown = raw;
+	if (typeof raw === 'string') {
+		const trimmed = raw.trim();
+		if (!trimmed) return [...DEFAULT_AVATAR_PRESETS];
+		if (trimmed.startsWith('[')) {
+			try {
+				list = JSON.parse(trimmed);
+			} catch {
+				list = trimmed.split(/\r?\n/);
+			}
+		} else {
+			list = trimmed.split(/\r?\n/);
+		}
+	}
+	if (!Array.isArray(list)) return [...DEFAULT_AVATAR_PRESETS];
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (const item of list) {
+		const s = String(item || '').trim();
+		if (!s || seen.has(s)) continue;
+		seen.add(s);
+		out.push(s);
+	}
+	return out.length ? out.slice(0, 48) : [...DEFAULT_AVATAR_PRESETS];
+}
 let schemaReadyInIsolate = false;
 
 export default {
@@ -217,15 +250,33 @@ export default {
 
 		const r2PublicBase = () => ((env as any).BUCKET ? `${getBaseUrl()}/r2` : undefined);
 
-		const createDefaultAvatarUrl = async (userId: string | number, seed?: string) => {
-			const svg = await generateIdenticonSvg(String(seed ?? userId));
-			return uploadAvatarBytes(env as unknown as S3Env, userId, svg, 'image/svg+xml', `identicon-${userId}.svg`, r2PublicBase());
+		const createDefaultAvatarUrl = async (userId: string | number, _seed?: string) => {
+			const n = Math.abs(Number(userId) || 0) % DEFAULT_AVATAR_PRESET_COUNT;
+			return `/api/preset-avatars/${n + 1}`;
 		};
 
-		const normalizeAvatarUrl = async (userId: string | number, avatarUrl: string) => {
+		const getConfiguredAvatarPresets = async () => {
+			const row = await env.cforum_db
+				.prepare(`SELECT value FROM settings WHERE key = 'avatar_presets'`)
+				.first<{ value: string }>();
+			return parseAvatarPresets(row?.value);
+		};
+
+		const normalizeAvatarUrl = async (
+			userId: string | number,
+			avatarUrl: string,
+			opts?: { allowUpload?: boolean; presetsOnly?: boolean }
+		) => {
 			const value = String(avatarUrl || '').trim();
 			if (!value) return createDefaultAvatarUrl(userId);
+			if (opts?.presetsOnly) {
+				const presets = await getConfiguredAvatarPresets();
+				if (!presets.includes(value)) throw new Error('请从预设头像中选择');
+				return value;
+			}
+			if (value.startsWith('/api/preset-avatars/')) return value;
 			if (value.startsWith('data:image/')) {
+				if (!opts?.allowUpload) throw new Error('不支持自定义上传头像，请选择预设头像');
 				return uploadAvatarDataUri(env as unknown as S3Env, userId, value, r2PublicBase());
 			}
 			if (value.startsWith('/r2/')) return value;
@@ -233,7 +284,7 @@ export default {
 				if (value.length > 500) throw new Error('Avatar URL too long (Max 500 chars)');
 				return value;
 			}
-			throw new Error('Invalid Avatar URL (Must start with http://, https:// or /r2/)');
+			throw new Error('Invalid Avatar URL');
 		};
 
 		// CORS headers helper
@@ -722,7 +773,8 @@ export default {
 						'friend_links',
 						JSON.stringify([{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }])
 					],
-					['allowed_link_hosts', JSON.stringify(['aridjaya.eu.org'])]
+					['allowed_link_hosts', JSON.stringify(['aridjaya.eu.org'])],
+					['avatar_presets', JSON.stringify(DEFAULT_AVATAR_PRESETS)]
 				];
 				for (const [key, value] of siteBrandDefaults) {
 					await env.cforum_db
@@ -988,7 +1040,7 @@ export default {
             '/api/config', '/api/login', '/api/register', '/api/verify', 
             '/api/auth/forgot-password', '/api/auth/reset-password', '/api/verify-email-change',
              // Static/Public GETs
-            '/api/posts', '/api/categories', '/api/users',
+            '/api/posts', '/api/categories', '/api/users', '/api/preset-avatars',
 			'/api/export/site-categories', '/api/export/site-posts', '/api/export/site-meta'
         ];
         
@@ -997,7 +1049,8 @@ export default {
             publicPaths.includes(url.pathname) || 
             url.pathname.match(/^\/api\/posts\/\d+$/) || 
             url.pathname.match(/^\/api\/posts\/\d+\/comments$/) ||
-			url.pathname.match(/^\/api\/export\/site-posts\/\d+$/)
+			url.pathname.match(/^\/api\/export\/site-posts\/\d+$/) ||
+			url.pathname.match(/^\/api\/preset-avatars\/\d+$/)
         );
 
         // However, user specifically asked for "Replay protection for sensitive operations".
@@ -1028,12 +1081,14 @@ export default {
 			'footer_rights',
 			'friend_links',
 			'allowed_link_hosts',
-			'ops_playbook'
+			'ops_playbook',
+			'avatar_presets'
 		]);
 		const DEFAULT_FRIEND_LINKS_JSON = JSON.stringify([
 			{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }
 		]);
 		const DEFAULT_ALLOWED_LINK_HOSTS_JSON = serializeAllowedLinkHosts(DEFAULT_ALLOWED_LINK_HOSTS);
+		const DEFAULT_AVATAR_PRESETS_JSON = JSON.stringify(DEFAULT_AVATAR_PRESETS);
 		const SITE_META_DEFAULTS: Record<string, string> = {
 			site_brand: 'liuyuliangbox',
 			project_codename: 'Project Turn',
@@ -1044,7 +1099,8 @@ export default {
 			footer_rights: '保留所有权利。',
 			friend_links: DEFAULT_FRIEND_LINKS_JSON,
 			allowed_link_hosts: DEFAULT_ALLOWED_LINK_HOSTS_JSON,
-			ops_playbook: DEFAULT_OPS_PLAYBOOK
+			ops_playbook: DEFAULT_OPS_PLAYBOOK,
+			avatar_presets: DEFAULT_AVATAR_PRESETS_JSON
 		};
 
 		const normalizeFriendLinksJson = (raw: unknown): string => {
@@ -1215,7 +1271,8 @@ export default {
 					footer_rights,
 					friend_links,
 					allowed_link_hosts,
-					ops_playbook
+					ops_playbook,
+					avatar_presets
 				} = body;
 				
 				const stmt = env.cforum_db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
@@ -1245,12 +1302,48 @@ export default {
 				if (ops_playbook !== undefined) {
 					batch.push(stmt.bind('ops_playbook', String(ops_playbook || '').slice(0, 20000)));
 				}
+				if (avatar_presets !== undefined) {
+					batch.push(
+						stmt.bind('avatar_presets', JSON.stringify(parseAvatarPresets(avatar_presets)))
+					);
+				}
 				
 				if (batch.length > 0) await env.cforum_db.batch(batch);
 				if (allowed_link_hosts !== undefined) invalidateAllowedLinkHostsCache();
 				bumpMetaCacheVersion();
 
 				return jsonResponse({ success: true });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/preset-avatars — list configured preset URLs
+		if (url.pathname === '/api/preset-avatars' && method === 'GET') {
+			try {
+				const presets = await getConfiguredAvatarPresets();
+				return jsonResponse({ presets });
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/preset-avatars/:id — generated placeholder SVG
+		if (url.pathname.match(/^\/api\/preset-avatars\/\d+$/) && method === 'GET') {
+			try {
+				const id = Number(url.pathname.split('/')[3]);
+				if (!Number.isFinite(id) || id < 1 || id > 48) {
+					return new Response('Not found', { status: 404, headers: corsHeaders });
+				}
+				const svg = await generateIdenticonSvg(`preset-avatar-${id}`);
+				return new Response(svg, {
+					status: 200,
+					headers: {
+						...corsHeaders,
+						'Content-Type': 'image/svg+xml; charset=utf-8',
+						'Cache-Control': 'public, max-age=86400'
+					}
+				});
 			} catch (e) {
 				return handleError(e);
 			}
@@ -1273,16 +1366,20 @@ export default {
 			return true;
 		};
 
-		// POST /api/upload (Image Upload)
+		// POST /api/upload (Image Upload) — post images only; avatar upload disabled
 		if (url.pathname === '/api/upload' && method === 'POST') {
 			try {
 				const user = await authenticate(request);
 				
 				const formData = await request.formData();
 				const file = formData.get('file');
-				const userId = user.id.toString(); // Use verified user ID
+				const userId = user.id.toString();
 				const postId = formData.get('post_id') || 'general';
-				const type = formData.get('type') || 'post';
+				const type = String(formData.get('type') || 'post');
+
+				if (type === 'avatar') {
+					return jsonResponse({ error: '不支持上传头像，请选择预设头像' }, 400);
+				}
 
 				if (!file || !(file instanceof File)) {
 					return jsonResponse({ error: 'No file uploaded' }, 400);
@@ -1292,19 +1389,34 @@ export default {
 					return jsonResponse({ error: 'Only images are allowed' }, 400);
 				}
 
-// Check file size (2MB = 2 * 1024 * 1024 bytes)
-			const MAX_SIZE = 2 * 1024 * 1024;
-			if (file.size > MAX_SIZE) {
-				return jsonResponse({ error: 'File size too large (Max 2MB)' }, 400);
+				const MAX_SIZE = 2 * 1024 * 1024;
+				if (file.size > MAX_SIZE) {
+					return jsonResponse({ error: 'File size too large (Max 2MB)' }, 400);
 				}
 
-				const imageKey = await uploadImage(env as unknown as S3Env, file, userId, postId.toString(), type as 'post' | 'avatar');
-			const publicBase = (env as any).BUCKET ? `${getBaseUrl()}/r2` : undefined;
-			const imageUrl = getPublicUrl(env as unknown as S3Env, imageKey, publicBase);
+				if (user.role !== 'admin') {
+					const row = await env.cforum_db
+						.prepare('SELECT created_at FROM users WHERE id = ?')
+						.bind(user.id)
+						.first<{ created_at: string }>();
+					const raw = String(row?.created_at || '').trim();
+					const createdMs = raw
+						? Date.parse(/Z|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z')
+						: NaN;
+					const ageMs = Number.isFinite(createdMs) ? Date.now() - createdMs : 0;
+					const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+					if (ageMs < SEVEN_DAYS) {
+						return jsonResponse({ error: '注册满 7 天后才能上传图片' }, 403);
+					}
+				}
+
+				const imageKey = await uploadImage(env as unknown as S3Env, file, userId, postId.toString(), 'post');
+				const publicBase = (env as any).BUCKET ? `${getBaseUrl()}/r2` : undefined;
+				const imageUrl = getPublicUrl(env as unknown as S3Env, imageKey, publicBase);
 				return jsonResponse({ success: true, url: imageUrl });
 			} catch (e) {
 				console.error('Upload error:', e);
-				return handleError(e); // 401/403 will be caught here if auth fails
+				return handleError(e);
 			}
 		}
 
@@ -1399,6 +1511,8 @@ export default {
 				const { username, avatar_url, email_notifications } = body;
 				
 				const user_id = userPayload.id;
+				const currentUser = await env.cforum_db.prepare('SELECT * FROM users WHERE id = ?').bind(user_id).first<DBUser>();
+				if (!currentUser) return jsonResponse({ error: 'User not found' }, 404);
 
 				if (username) {
 					if (username.length > 20) return jsonResponse({ error: 'Username too long (Max 20 chars)' }, 400);
@@ -1406,18 +1520,19 @@ export default {
 					if (hasInvisibleCharacters(username)) return jsonResponse({ error: 'Username contains invalid invisible characters' }, 400);
 					if (hasControlCharacters(username)) return jsonResponse({ error: 'Username contains invalid control characters' }, 400);
 					if (hasRestrictedKeywords(username)) return jsonResponse({ error: 'Username contains restricted keywords' }, 400);
+
+					if (username !== currentUser.username) {
+						const modErr = await assertContentModeration(env.cforum_db, username, {
+							skip: userPayload.role === 'admin'
+						});
+						if (modErr) return jsonResponse({ error: modErr }, 400);
+					}
 					
-					// Check Uniqueness
 					const existingUser = await env.cforum_db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').bind(username, user_id).first<{id:number}>();
 					if (existingUser) {
 						return jsonResponse({ error: 'Username already taken' }, 409);
 					}
 				}
-
-				// Fetch current user
-				const currentUser = await env.cforum_db.prepare('SELECT * FROM users WHERE id = ?').bind(user_id).first<DBUser>();
-			if (!currentUser) return jsonResponse({ error: 'User not found' }, 404);
-				if (!currentUser) return jsonResponse({ error: 'User not found' }, 404);
 
 				let newUsername = currentUser.username;
 				if (username !== undefined) {
@@ -1429,25 +1544,18 @@ export default {
 					try {
 						if (avatar_url === '' || avatar_url === null) {
 							newAvatarUrl = await createDefaultAvatarUrl(user_id);
-						} else if (typeof avatar_url === 'string' && avatar_url.startsWith('data:image/')) {
-							newAvatarUrl = await normalizeAvatarUrl(user_id, avatar_url);
 						} else if (currentUser.avatar_url && avatar_url === currentUser.avatar_url) {
-							newAvatarUrl = currentUser.avatar_url.startsWith('data:image/')
-								? await normalizeAvatarUrl(user_id, currentUser.avatar_url)
+							newAvatarUrl = String(currentUser.avatar_url).startsWith('data:image/')
+								? await createDefaultAvatarUrl(user_id)
 								: currentUser.avatar_url;
 						} else {
-							newAvatarUrl = await normalizeAvatarUrl(user_id, String(avatar_url));
+							newAvatarUrl = await normalizeAvatarUrl(user_id, String(avatar_url), { presetsOnly: true });
 						}
 					} catch (avatarErr: any) {
 						return jsonResponse({ error: String(avatarErr?.message || avatarErr) }, 400);
 					}
 				} else if (currentUser.avatar_url && String(currentUser.avatar_url).startsWith('data:image/')) {
-					// Migrate legacy data-URI avatars to R2 on profile save
-					try {
-						newAvatarUrl = await normalizeAvatarUrl(user_id, String(currentUser.avatar_url));
-					} catch (avatarErr: any) {
-						return jsonResponse({ error: String(avatarErr?.message || avatarErr) }, 400);
-					}
+					newAvatarUrl = await createDefaultAvatarUrl(user_id);
 				}
 
 				let newEmailNotif = currentUser.email_notifications;
@@ -2857,6 +2965,10 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (hasInvisibleCharacters(username)) return jsonResponse({ error: 'Username contains invalid invisible characters' }, 400);
 				if (hasControlCharacters(username)) return jsonResponse({ error: 'Username contains invalid control characters' }, 400);
 				if (hasRestrictedKeywords(username)) return jsonResponse({ error: 'Username contains restricted keywords' }, 400);
+				{
+					const modErr = await assertContentModeration(env.cforum_db, username);
+					if (modErr) return jsonResponse({ error: modErr }, 400);
+				}
 
 				if (password.length < 8 || password.length > 16) return jsonResponse({ error: 'Password must be 8-16 characters' }, 400);
 

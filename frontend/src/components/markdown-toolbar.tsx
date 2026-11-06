@@ -36,22 +36,22 @@ type ToolbarItem = {
 
 const ITEMS: ToolbarItem[] = [
 	{ action: 'bold', label: '粗体', title: '粗体 (Ctrl+B)', icon: <Bold className="h-4 w-4" /> },
-	{ action: 'strike', label: '删除线', title: '删除线 (Alt+Shift+5)', icon: <Strikethrough className="h-4 w-4" /> },
-	{ action: 'h2', label: 'H2', title: '二级标题 (Ctrl+2)', icon: <Heading2 className="h-4 w-4" /> },
-	{ action: 'h3', label: 'H3', title: '三级标题 (Ctrl+3)', icon: <Heading3 className="h-4 w-4" /> },
 	{ action: 'quote', label: '引用', title: '引用 (Ctrl+Shift+Q)', icon: <Quote className="h-4 w-4" /> },
 	{ action: 'ul', label: '无序列表', title: '无序列表 (Ctrl+Shift+])', icon: <List className="h-4 w-4" /> },
 	{ action: 'ol', label: '有序列表', title: '有序列表 (Ctrl+Shift+[)', icon: <ListOrdered className="h-4 w-4" /> },
-	{ action: 'outdent', label: '减少缩进', title: '减少缩进 (Ctrl+[)', icon: <IndentDecrease className="h-4 w-4" /> },
-	{ action: 'indent', label: '增加缩进', title: '增加缩进 (Ctrl+])', icon: <IndentIncrease className="h-4 w-4" /> },
-	{ kind: 'image', label: '图片', title: '上传图片', icon: <ImageIcon className="h-4 w-4" /> },
-	{ action: 'italic', label: '斜体', title: '斜体 (Ctrl+I)', icon: <Italic className="h-4 w-4" />, adminOnly: true },
-	{ action: 'link', label: '链接', title: '插入链接 (Ctrl+K)', icon: <Link className="h-4 w-4" />, adminOnly: true },
-	{ action: 'underline', label: '下划线', title: '下划线 (Ctrl+U)', icon: <Underline className="h-4 w-4" />, adminOnly: true },
-	{ action: 'inlineCode', label: '行内代码', title: '行内代码 (Ctrl+Shift+`)', icon: <Code className="h-4 w-4" />, adminOnly: true },
-	{ action: 'codeBlock', label: '代码块', title: '代码块 (Ctrl+Shift+K)', icon: <FileCode2 className="h-4 w-4" />, adminOnly: true },
-	{ action: 'table', label: '表格', title: '表格 (Ctrl+T)', icon: <Table className="h-4 w-4" />, adminOnly: true },
-	{ action: 'formula', label: '公式', title: '公式 (Ctrl+Shift+M)', icon: <Sigma className="h-4 w-4" />, adminOnly: true }
+	{ kind: 'image', label: '图片', title: '上传图片（注册满 7 天）', icon: <ImageIcon className="h-4 w-4" /> },
+	{ action: 'italic', label: '斜体', title: '斜体 (Ctrl+I)', icon: <Italic className="h-4 w-4" /> },
+	{ action: 'link', label: '链接', title: '插入链接 (Ctrl+K)', icon: <Link className="h-4 w-4" /> },
+	{ action: 'underline', label: '下划线', title: '下划线 (Ctrl+U)', icon: <Underline className="h-4 w-4" /> },
+	{ action: 'inlineCode', label: '行内代码', title: '行内代码 (Ctrl+Shift+`)', icon: <Code className="h-4 w-4" /> },
+	{ action: 'codeBlock', label: '代码块', title: '代码块 (Ctrl+Shift+K)', icon: <FileCode2 className="h-4 w-4" /> },
+	{ action: 'table', label: '表格', title: '表格 (Ctrl+T)', icon: <Table className="h-4 w-4" /> },
+	{ action: 'formula', label: '公式', title: '公式 (Ctrl+Shift+M)', icon: <Sigma className="h-4 w-4" /> },
+	{ action: 'strike', label: '删除线', title: '删除线 (Alt+Shift+5)', icon: <Strikethrough className="h-4 w-4" />, adminOnly: true },
+	{ action: 'h2', label: 'H2', title: '二级标题 (Ctrl+2)', icon: <Heading2 className="h-4 w-4" />, adminOnly: true },
+	{ action: 'h3', label: 'H3', title: '三级标题 (Ctrl+3)', icon: <Heading3 className="h-4 w-4" />, adminOnly: true },
+	{ action: 'outdent', label: '减少缩进', title: '减少缩进 (Ctrl+[)', icon: <IndentDecrease className="h-4 w-4" />, adminOnly: true },
+	{ action: 'indent', label: '增加缩进', title: '增加缩进 (Ctrl+])', icon: <IndentIncrease className="h-4 w-4" />, adminOnly: true }
 ];
 
 export function MarkdownToolbar({

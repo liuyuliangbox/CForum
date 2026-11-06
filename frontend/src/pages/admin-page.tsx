@@ -68,7 +68,8 @@ export function AdminPage() {
 			url: string;
 		}>,
 		allowed_link_hosts_text: 'aridjaya.eu.org',
-		ops_playbook: ''
+		ops_playbook: '',
+		avatar_presets_text: ''
 	});
 
 	const [newCategoryName, setNewCategoryName] = React.useState('');
@@ -203,7 +204,26 @@ export function AdminPage() {
 					? friendLinks
 					: [{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }],
 				allowed_link_hosts_text: allowedHostsText || 'aridjaya.eu.org',
-				ops_playbook: String(settings.ops_playbook || '')
+				ops_playbook: String(settings.ops_playbook || ''),
+				avatar_presets_text: (() => {
+					const raw = settings.avatar_presets;
+					if (Array.isArray(raw)) return raw.map((s: unknown) => String(s || '').trim()).filter(Boolean).join('\n');
+					if (typeof raw === 'string') {
+						const t = raw.trim();
+						if (t.startsWith('[')) {
+							try {
+								const parsed = JSON.parse(t);
+								if (Array.isArray(parsed)) {
+									return parsed.map((s) => String(s || '').trim()).filter(Boolean).join('\n');
+								}
+							} catch {
+								/* fallthrough */
+							}
+						}
+						return t;
+					}
+					return '';
+				})()
 			});
 		} catch (e: any) {
 			setError(String(e?.message || e));
@@ -225,12 +245,17 @@ export function AdminPage() {
 				.split(/[\n,]+/)
 				.map((s) => s.trim())
 				.filter(Boolean);
+			const avatarPresets = systemSettings.avatar_presets_text
+				.split(/\r?\n/)
+				.map((s) => s.trim())
+				.filter(Boolean);
 			await apiFetch('/admin/settings', {
 				method: 'POST',
 				headers: getSecurityHeaders('POST'),
 				body: JSON.stringify({
 					...systemSettings,
-					allowed_link_hosts: allowedHosts.length ? allowedHosts : ['aridjaya.eu.org']
+					allowed_link_hosts: allowedHosts.length ? allowedHosts : ['aridjaya.eu.org'],
+					avatar_presets: avatarPresets
 				})
 			});
 			invalidateConfigCache();
@@ -846,6 +871,39 @@ export function AdminPage() {
 									<p className="text-xs text-muted-foreground">
 										普通用户外链仅允许这些域名及其子域；管理员发布不受限。默认 aridjaya.eu.org。
 									</p>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="avatar-presets">预设头像列表（一行一个 URL）</Label>
+									<Textarea
+										id="avatar-presets"
+										rows={6}
+										value={systemSettings.avatar_presets_text}
+										onChange={(e) =>
+											setSystemSettings((s) => ({ ...s, avatar_presets_text: e.target.value }))
+										}
+										placeholder={'/api/preset-avatars/1\n/api/preset-avatars/2'}
+										className="font-mono text-sm"
+									/>
+									<p className="text-xs text-muted-foreground">
+										用户只能从这里选择头像，不支持上传。留空则恢复默认 12 个生成占位图（/api/preset-avatars/1…12）。
+									</p>
+									{systemSettings.avatar_presets_text.trim() ? (
+										<div className="flex flex-wrap gap-2 pt-1">
+											{systemSettings.avatar_presets_text
+												.split(/\r?\n/)
+												.map((s) => s.trim())
+												.filter(Boolean)
+												.slice(0, 24)
+												.map((url) => (
+													<img
+														key={url}
+														src={url}
+														alt=""
+														className="h-10 w-10 rounded-md border bg-muted object-cover"
+													/>
+												))}
+										</div>
+									) : null}
 								</div>
 								<div className="space-y-2">
 									<div className="flex flex-wrap items-center justify-between gap-2">
@@ -1498,7 +1556,7 @@ export function AdminPage() {
 										<Input id="edit-email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} type="email" />
 									</div>
 									<div className="grid gap-2">
-										<Label htmlFor="edit-avatar">头像 URL</Label>
+										<Label htmlFor="edit-avatar">头像 URL（管理员可填预设或外链）</Label>
 										<Input
 											id="edit-avatar"
 											value={editAvatarUrl}
