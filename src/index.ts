@@ -4390,15 +4390,25 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				pathname === '/forgot' ? '/forgot.html' :
 				pathname === '/reset' ? '/reset.html' :
 				pathname === '/settings' ? '/settings.html' :
-				pathname === `/${panelSlug}` || pathname === panelHtml ? panelHtml :
+				// Prefer extensionless path; forcing *.html can 308→pretty URL and loop
+				pathname === `/${panelSlug}` || pathname === panelHtml ? `/${panelSlug}` :
 				pathname === '/post' ? '/post.html' :
 				pathname;
 
 			const assetUrl = new URL(request.url);
 			assetUrl.pathname = mapped;
-			const assetRes = await (env as any).ASSETS.fetch(new Request(assetUrl, request));
-			if (assetRes.status !== 404) {
-				if (mapped === panelHtml) {
+			let assetRes = await (env as any).ASSETS.fetch(new Request(assetUrl, request));
+			if (
+				(assetRes.status === 404 || (assetRes.status >= 300 && assetRes.status < 400)) &&
+				(pathname === `/${panelSlug}` || pathname === panelHtml)
+			) {
+				assetUrl.pathname = panelHtml;
+				assetRes = await (env as any).ASSETS.fetch(
+					new Request(assetUrl.toString(), { method: 'GET', redirect: 'manual' })
+				);
+			}
+			if (assetRes.status !== 404 && !(assetRes.status >= 300 && assetRes.status < 400)) {
+				if (pathname === `/${panelSlug}` || pathname === panelHtml || mapped === `/${panelSlug}`) {
 					const headers = new Headers(assetRes.headers);
 					for (const [k, v] of Object.entries(noIndexHeaders)) headers.set(k, v);
 					return new Response(assetRes.body, { status: assetRes.status, headers });
@@ -4407,7 +4417,9 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			}
 			if (mapped !== pathname) {
 				const directRes = await (env as any).ASSETS.fetch(request);
-				if (directRes.status !== 404) return directRes;
+				if (directRes.status !== 404 && !(directRes.status >= 300 && directRes.status < 400)) {
+					return directRes;
+				}
 			}
 			return new Response('Not Found', { status: 404 });
 		}

@@ -34,9 +34,8 @@ export default {
 		'/settings': 'functions/[[path]]',
 		'/admin': 'functions/[[path]]',
 		'/admin.html': 'functions/[[path]]',
-		'/c-ops-k7m2xq': 'functions/[[path]]',
-		'/c-ops-k7m2xq.html': 'functions/[[path]]',
-		
+		// Obscure admin HTML is static (Pages pretty URL); do not force through Functions
+
 		// 静态资源从 public 返回
 		'*': 'public/*'
 	}

@@ -4,8 +4,6 @@
  * Also closes the legacy /admin entry.
  */
 
-import { getAdminPanelPath } from '../shared/admin-panel-path';
-
 export const onRequest: PagesFunction<{
 	WORKER_URL?: string;
 	ADMIN_PANEL_PATH?: string;
@@ -38,21 +36,11 @@ export const onRequest: PagesFunction<{
 		});
 	}
 
-	const panelSlug = getAdminPanelPath(env.ADMIN_PANEL_PATH);
-	if (pathname === `/${panelSlug}` || pathname === `/${panelSlug}.html`) {
-		const assetUrl = new URL(`/${panelSlug}.html`, url.origin);
-		const assetRes = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
-		const headers = new Headers(assetRes.headers);
-		headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
-		headers.set('X-Frame-Options', 'DENY');
-		headers.set('Referrer-Policy', 'no-referrer');
-		headers.set('Cache-Control', 'no-store');
-		return new Response(assetRes.body, { status: assetRes.status, statusText: assetRes.statusText, headers });
-	}
-
 	const isApiRoute = pathname.startsWith('/api/');
 	const isR2Route = pathname.startsWith('/r2/');
 
+	// Let Pages serve static HTML (incl. obscure admin entry). Do NOT ASSETS.fetch
+	// `*.html` here — Pages returns 308 → extensionless URL and that loops forever.
 	if (!isApiRoute && !isR2Route) {
 		return context.next();
 	}
