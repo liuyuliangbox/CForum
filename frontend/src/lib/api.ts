@@ -10,8 +10,7 @@ export type ForumConfig = {
 	guest_gate_enabled?: boolean;
 	guest_gate_soft_posts?: number;
 	guest_gate_soft_lists?: number;
-	guest_gate_hard_posts?: number;
-	guest_gate_hard_lists?: number;
+	guest_gate_soft_times?: number;
 };
 
 export type Category = {

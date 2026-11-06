@@ -25,6 +25,7 @@ import {
 import { getToken, getUser } from '@/lib/auth';
 import {
 	currentPageAsNext,
+	dismissSoftPrompt,
 	markSoftShown,
 	parseGuestGateFromConfig,
 	recordPostView,
@@ -1613,7 +1614,10 @@ export function PostPage() {
 					mode={gatePrompt}
 					open
 					nextPath={currentPageAsNext()}
-					onDismissSoft={() => setGatePrompt(null)}
+					onDismissSoft={() => {
+						const next = dismissSoftPrompt(gateThresholds);
+						setGatePrompt(next === 'hard' ? 'hard' : null);
+					}}
 				/>
 			) : null}
 		</PageShell>

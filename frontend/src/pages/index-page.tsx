@@ -27,6 +27,7 @@ import { getToken, getUser } from '@/lib/auth';
 import {
 	currentPageAsNext,
 	isHardGated,
+	dismissSoftPrompt,
 	markSoftShown,
 	parseGuestGateFromConfig,
 	recordListFetch,
@@ -1486,7 +1487,10 @@ export function IndexPage() {
 					mode={gatePrompt}
 					open
 					nextPath={currentPageAsNext()}
-					onDismissSoft={() => setGatePrompt(null)}
+					onDismissSoft={() => {
+						const next = dismissSoftPrompt(gateThresholds);
+						setGatePrompt(next === 'hard' ? 'hard' : null);
+					}}
 				/>
 			) : null}
 		</PageShell>

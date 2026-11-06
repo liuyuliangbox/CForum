@@ -57,10 +57,9 @@ export function AdminPage() {
 		notify_on_post_status_change: true,
 		notify_on_site_feature: true,
 		guest_gate_enabled: true,
-		guest_gate_soft_posts: 3,
-		guest_gate_soft_lists: 2,
-		guest_gate_hard_posts: 5,
-		guest_gate_hard_lists: 4,
+		guest_gate_soft_posts: 15,
+		guest_gate_soft_lists: 10,
+		guest_gate_soft_times: 3,
 		site_title: DEFAULT_SITE_TITLE,
 		site_tagline: DEFAULT_SITE_TAGLINE,
 		site_brand: 'liuyuliangbox',
@@ -198,10 +197,9 @@ export function AdminPage() {
 				notify_on_post_status_change: settings.notify_on_post_status_change !== false,
 				notify_on_site_feature: settings.notify_on_site_feature !== false,
 				guest_gate_enabled: settings.guest_gate_enabled !== false,
-				guest_gate_soft_posts: Number(settings.guest_gate_soft_posts) || 3,
-				guest_gate_soft_lists: Number(settings.guest_gate_soft_lists) || 2,
-				guest_gate_hard_posts: Number(settings.guest_gate_hard_posts) || 5,
-				guest_gate_hard_lists: Number(settings.guest_gate_hard_lists) || 4,
+				guest_gate_soft_posts: Number(settings.guest_gate_soft_posts) || 15,
+				guest_gate_soft_lists: Number(settings.guest_gate_soft_lists) || 10,
+				guest_gate_soft_times: Number(settings.guest_gate_soft_times) || 3,
 				site_title: settings.site_title || DEFAULT_SITE_TITLE,
 				site_tagline: settings.site_tagline || DEFAULT_SITE_TAGLINE,
 				site_brand: settings.site_brand || 'liuyuliangbox',
@@ -910,12 +908,12 @@ export function AdminPage() {
 												<Input
 													type="number"
 													min={1}
-													max={50}
+													max={200}
 													value={systemSettings.guest_gate_soft_posts}
 													onChange={(e) =>
 														setSystemSettings((s) => ({
 															...s,
-															guest_gate_soft_posts: Number(e.target.value) || 3
+															guest_gate_soft_posts: Number(e.target.value) || 15
 														}))
 													}
 												/>
@@ -925,48 +923,33 @@ export function AdminPage() {
 												<Input
 													type="number"
 													min={1}
-													max={50}
+													max={200}
 													value={systemSettings.guest_gate_soft_lists}
 													onChange={(e) =>
 														setSystemSettings((s) => ({
 															...s,
-															guest_gate_soft_lists: Number(e.target.value) || 2
+															guest_gate_soft_lists: Number(e.target.value) || 10
 														}))
 													}
 												/>
 											</label>
-											<label className="space-y-1 text-sm">
-												<span className="text-muted-foreground">硬拦住：不同帖数 ≥</span>
+											<label className="space-y-1 text-sm sm:col-span-2">
+												<span className="text-muted-foreground">软提示可关闭次数（达到后硬拦）</span>
 												<Input
 													type="number"
 													min={1}
-													max={50}
-													value={systemSettings.guest_gate_hard_posts}
+													max={20}
+													value={systemSettings.guest_gate_soft_times}
 													onChange={(e) =>
 														setSystemSettings((s) => ({
 															...s,
-															guest_gate_hard_posts: Number(e.target.value) || 5
-														}))
-													}
-												/>
-											</label>
-											<label className="space-y-1 text-sm">
-												<span className="text-muted-foreground">硬拦住：列表加载次数 ≥</span>
-												<Input
-													type="number"
-													min={1}
-													max={50}
-													value={systemSettings.guest_gate_hard_lists}
-													onChange={(e) =>
-														setSystemSettings((s) => ({
-															...s,
-															guest_gate_hard_lists: Number(e.target.value) || 4
+															guest_gate_soft_times: Number(e.target.value) || 3
 														}))
 													}
 												/>
 											</label>
 											<p className="text-xs text-muted-foreground sm:col-span-2">
-												达到软阈值弹窗可关闭；继续浏览达到硬阈值后，翻页或打开新帖需登录。
+												每次关闭软提示会重置浏览计数并 +1；达到设定次数后，翻页或打开新帖需登录。
 											</p>
 										</div>
 									) : null}

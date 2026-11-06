@@ -190,7 +190,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 23;
+const SCHEMA_VERSION = 24;
 
 const DEFAULT_AVATAR_PRESET_COUNT = 12;
 const DEFAULT_AVATAR_PRESETS = Array.from(
@@ -454,10 +454,9 @@ export default {
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_post_status_change', '1');`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_site_feature', '1');`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_enabled', '1');`,
-					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_posts', '3');`,
-					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_lists', '2');`,
-					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_hard_posts', '5');`,
-					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_hard_lists', '4');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_posts', '15');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_lists', '10');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_times', '3');`,
 					`INSERT OR IGNORE INTO users (email, username, password, role, verified, nickname) VALUES 
 ('admin@adysec.com', 'Admin', 'e86f78a8a3caf0b60d8e74e5942aa6d86dc150cd3c03338aef25b7d2d7e3acc7', 'admin', 1, 'System Admin');`
 				];
@@ -726,16 +725,20 @@ export default {
 					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_enabled', '1')`)
 					.run();
 				await env.cforum_db
-					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_posts', '3')`)
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_posts', '15')`)
 					.run();
 				await env.cforum_db
-					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_lists', '2')`)
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_lists', '10')`)
 					.run();
 				await env.cforum_db
-					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_hard_posts', '5')`)
+					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_soft_times', '3')`)
+					.run();
+				// Migrate prior defaults (3/2) → 5× (15/10); leave custom values alone
+				await env.cforum_db
+					.prepare(`UPDATE settings SET value = '15' WHERE key = 'guest_gate_soft_posts' AND value = '3'`)
 					.run();
 				await env.cforum_db
-					.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('guest_gate_hard_lists', '4')`)
+					.prepare(`UPDATE settings SET value = '10' WHERE key = 'guest_gate_soft_lists' AND value = '2'`)
 					.run();
 			} catch (e) {
 				console.error('Failed to seed notify / guest_gate settings', e);
@@ -1110,8 +1113,7 @@ export default {
 		const INT_SETTING_KEYS = new Set([
 			'guest_gate_soft_posts',
 			'guest_gate_soft_lists',
-			'guest_gate_hard_posts',
-			'guest_gate_hard_lists'
+			'guest_gate_soft_times'
 		]);
 		const STRING_SETTING_KEYS = new Set([
 			'site_title',
@@ -1128,10 +1130,10 @@ export default {
 			'ops_playbook',
 			'avatar_presets'
 		]);
-		const clampGuestGateInt = (raw: unknown, fallback: number) => {
+		const clampGuestGateInt = (raw: unknown, fallback: number, max = 200) => {
 			const n = typeof raw === 'number' ? raw : parseInt(String(raw ?? ''), 10);
 			if (!Number.isFinite(n)) return fallback;
-			return Math.min(50, Math.max(1, Math.floor(n)));
+			return Math.min(max, Math.max(1, Math.floor(n)));
 		};
 		const DEFAULT_FRIEND_LINKS_JSON = JSON.stringify([
 			{ label: '社区 bbs.aridjaya.eu.org', url: 'https://bbs.aridjaya.eu.org' }
@@ -1189,8 +1191,7 @@ export default {
 								'guest_gate_enabled',
 								'guest_gate_soft_posts',
 								'guest_gate_soft_lists',
-								'guest_gate_hard_posts',
-								'guest_gate_hard_lists'
+								'guest_gate_soft_times'
 							)`
 						)
 						.all<DBSetting & { key: string }>()
@@ -1216,10 +1217,9 @@ export default {
 					site_title: titleRow?.value || 'liuyuliangbox / Project Turn',
 					site_tagline: taglineRow?.value || '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
 					guest_gate_enabled: gateEnabled,
-					guest_gate_soft_posts: clampGuestGateInt(gateMap.get('guest_gate_soft_posts'), 3),
-					guest_gate_soft_lists: clampGuestGateInt(gateMap.get('guest_gate_soft_lists'), 2),
-					guest_gate_hard_posts: clampGuestGateInt(gateMap.get('guest_gate_hard_posts'), 5),
-					guest_gate_hard_lists: clampGuestGateInt(gateMap.get('guest_gate_hard_lists'), 4)
+					guest_gate_soft_posts: clampGuestGateInt(gateMap.get('guest_gate_soft_posts'), 15),
+					guest_gate_soft_lists: clampGuestGateInt(gateMap.get('guest_gate_soft_lists'), 10),
+					guest_gate_soft_times: clampGuestGateInt(gateMap.get('guest_gate_soft_times'), 3, 20)
 				});
 			} catch (e) {
 				return handleError(e);
@@ -1242,10 +1242,9 @@ export default {
 					notify_on_post_status_change: true,
 					notify_on_site_feature: true,
 					guest_gate_enabled: true,
-					guest_gate_soft_posts: 3,
-					guest_gate_soft_lists: 2,
-					guest_gate_hard_posts: 5,
-					guest_gate_hard_lists: 4,
+					guest_gate_soft_posts: 15,
+					guest_gate_soft_lists: 10,
+					guest_gate_soft_times: 3,
 					site_title: 'liuyuliangbox / Project Turn',
 					site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
 					...SITE_META_DEFAULTS
@@ -1345,8 +1344,7 @@ export default {
 					guest_gate_enabled,
 					guest_gate_soft_posts,
 					guest_gate_soft_lists,
-					guest_gate_hard_posts,
-					guest_gate_hard_lists,
+					guest_gate_soft_times,
 					site_title,
 					site_tagline,
 					site_brand,
@@ -1380,16 +1378,15 @@ export default {
 					batch.push(stmt.bind('guest_gate_enabled', guest_gate_enabled ? '1' : '0'));
 				}
 				if (guest_gate_soft_posts !== undefined) {
-					batch.push(stmt.bind('guest_gate_soft_posts', String(clampGuestGateInt(guest_gate_soft_posts, 3))));
+					batch.push(stmt.bind('guest_gate_soft_posts', String(clampGuestGateInt(guest_gate_soft_posts, 15))));
 				}
 				if (guest_gate_soft_lists !== undefined) {
-					batch.push(stmt.bind('guest_gate_soft_lists', String(clampGuestGateInt(guest_gate_soft_lists, 2))));
+					batch.push(stmt.bind('guest_gate_soft_lists', String(clampGuestGateInt(guest_gate_soft_lists, 10))));
 				}
-				if (guest_gate_hard_posts !== undefined) {
-					batch.push(stmt.bind('guest_gate_hard_posts', String(clampGuestGateInt(guest_gate_hard_posts, 5))));
-				}
-				if (guest_gate_hard_lists !== undefined) {
-					batch.push(stmt.bind('guest_gate_hard_lists', String(clampGuestGateInt(guest_gate_hard_lists, 4))));
+				if (guest_gate_soft_times !== undefined) {
+					batch.push(
+						stmt.bind('guest_gate_soft_times', String(clampGuestGateInt(guest_gate_soft_times, 3, 20)))
+					);
 				}
 				if (site_title !== undefined) batch.push(stmt.bind('site_title', String(site_title).slice(0, 80)));
 				if (site_tagline !== undefined) batch.push(stmt.bind('site_tagline', String(site_tagline).slice(0, 160)));
