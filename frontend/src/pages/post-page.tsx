@@ -885,7 +885,7 @@ export function PostPage() {
 
 									{(!!post.category_enable_cited_from ||
 										(user && (user.role === 'admin' || user.id === post.author_id))) ? (
-										<div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+										<div className="ml-auto flex flex-wrap items-center justify-end gap-2">
 									{!!post.category_enable_cited_from ? (
 										<Button
 											variant="outline"
@@ -922,7 +922,7 @@ export function PostPage() {
 												<span className="sr-only">更多</span>
 											</Button>
 											{adminMenuOpen ? (
-												<div className="absolute left-0 top-full z-[60] mt-2 max-h-64 w-44 overflow-y-auto rounded-md border bg-background p-1 shadow-lg sm:left-auto sm:right-0">
+												<div className="absolute right-0 top-full z-[60] mt-2 max-h-64 w-44 overflow-y-auto rounded-md border bg-background p-1 shadow-lg">
 													{(user.role === 'admin' ||
 														(Number(post.is_visible ?? 1) === 1 &&
 															Number(post.site_featured ?? 0) !== 1) ||
