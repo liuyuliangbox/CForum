@@ -54,6 +54,7 @@ export function AdminPage() {
 		notify_on_username_change: false,
 		notify_on_avatar_change: false,
 		notify_on_manual_verify: false,
+		notify_on_post_status_change: true,
 		site_title: DEFAULT_SITE_TITLE,
 		site_tagline: DEFAULT_SITE_TAGLINE,
 		site_brand: 'liuyuliangbox',
@@ -188,6 +189,7 @@ export function AdminPage() {
 				notify_on_username_change: !!settings.notify_on_username_change,
 				notify_on_avatar_change: !!settings.notify_on_avatar_change,
 				notify_on_manual_verify: !!settings.notify_on_manual_verify,
+				notify_on_post_status_change: settings.notify_on_post_status_change !== false,
 				site_title: settings.site_title || DEFAULT_SITE_TITLE,
 				site_tagline: settings.site_tagline || DEFAULT_SITE_TAGLINE,
 				site_brand: settings.site_brand || 'liuyuliangbox',
@@ -855,6 +857,17 @@ export function AdminPage() {
 											onChange={(e) => setSystemSettings((s) => ({ ...s, notify_on_manual_verify: e.target.checked }))}
 										/>
 										手动验证通过时通知用户
+									</label>
+									<label className="flex items-center gap-2 text-sm">
+										<input
+											type="checkbox"
+											className="h-4 w-4"
+											checked={systemSettings.notify_on_post_status_change}
+											onChange={(e) =>
+												setSystemSettings((s) => ({ ...s, notify_on_post_status_change: e.target.checked }))
+											}
+										/>
+										帖子状态变更时邮件通知作者
 									</label>
 								</div>
 								<div className="space-y-2">

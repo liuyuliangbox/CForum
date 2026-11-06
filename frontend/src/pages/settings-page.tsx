@@ -311,7 +311,7 @@ export function SettingsPage() {
 								checked={emailNotifications}
 								onChange={(e) => setEmailNotifications(e.target.checked)}
 							/>
-							接收邮件通知 (仅限评论)
+							接收邮件通知（评论、帖子进度状态等）
 						</label>
 
 						<Button onClick={saveProfile} disabled={loading}>

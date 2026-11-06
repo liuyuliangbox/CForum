@@ -190,7 +190,7 @@ async function verifyTurnstile(token: string, ip: string, secretKey: string): Pr
 }
 
 /** Isolate-local: skip D1 schema_version reads after first success in this Worker instance. */
-const SCHEMA_VERSION = 20;
+const SCHEMA_VERSION = 21;
 
 const DEFAULT_AVATAR_PRESET_COUNT = 12;
 const DEFAULT_AVATAR_PRESETS = Array.from(
@@ -451,6 +451,7 @@ export default {
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('turnstile_enabled', '0');`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_title', 'liuyuliangbox / Project Turn');`,
 					`INSERT OR IGNORE INTO settings (key, value) VALUES ('site_tagline', '由 Cloudflare Workers、Pages、D1、R2 提供服务。');`,
+					`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_post_status_change', '1');`,
 					`INSERT OR IGNORE INTO users (email, username, password, role, verified, nickname) VALUES 
 ('admin@adysec.com', 'Admin', 'e86f78a8a3caf0b60d8e74e5942aa6d86dc150cd3c03338aef25b7d2d7e3acc7', 'admin', 1, 'System Admin');`
 				];
@@ -705,6 +706,15 @@ export default {
 					.run();
 			} catch (e) {
 				console.error('Failed to seed ops_playbook', e);
+			}
+			try {
+				await env.cforum_db
+					.prepare(
+						`INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_on_post_status_change', '1')`
+					)
+					.run();
+			} catch (e) {
+				console.error('Failed to seed notify_on_post_status_change', e);
 			}
 			try {
 				await env.cforum_db
@@ -1068,7 +1078,8 @@ export default {
 			'notify_on_user_delete',
 			'notify_on_username_change',
 			'notify_on_avatar_change',
-			'notify_on_manual_verify'
+			'notify_on_manual_verify',
+			'notify_on_post_status_change'
 		]);
 		const STRING_SETTING_KEYS = new Set([
 			'site_title',
@@ -1169,6 +1180,7 @@ export default {
 					notify_on_username_change: false,
 					notify_on_avatar_change: false,
 					notify_on_manual_verify: false,
+					notify_on_post_status_change: true,
 					site_title: 'liuyuliangbox / Project Turn',
 					site_tagline: '由 Cloudflare Workers、Pages、D1、R2 提供服务。',
 					...SITE_META_DEFAULTS
@@ -1261,6 +1273,7 @@ export default {
 					notify_on_username_change,
 					notify_on_avatar_change,
 					notify_on_manual_verify,
+					notify_on_post_status_change,
 					site_title,
 					site_tagline,
 					site_brand,
@@ -1284,6 +1297,9 @@ export default {
 				if (notify_on_username_change !== undefined) batch.push(stmt.bind('notify_on_username_change', notify_on_username_change ? '1' : '0'));
 				if (notify_on_avatar_change !== undefined) batch.push(stmt.bind('notify_on_avatar_change', notify_on_avatar_change ? '1' : '0'));
 				if (notify_on_manual_verify !== undefined) batch.push(stmt.bind('notify_on_manual_verify', notify_on_manual_verify ? '1' : '0'));
+				if (notify_on_post_status_change !== undefined) {
+					batch.push(stmt.bind('notify_on_post_status_change', notify_on_post_status_change ? '1' : '0'));
+				}
 				if (site_title !== undefined) batch.push(stmt.bind('site_title', String(site_title).slice(0, 80)));
 				if (site_tagline !== undefined) batch.push(stmt.bind('site_tagline', String(site_tagline).slice(0, 160)));
 				if (site_brand !== undefined) batch.push(stmt.bind('site_brand', String(site_brand).slice(0, 80)));
@@ -3541,20 +3557,29 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				const nextStatus = String(body?.status || '').trim();
 				const post = await env.cforum_db
 					.prepare(
-						`SELECT posts.id, posts.author_id, posts.category_id,
+						`SELECT posts.id, posts.title, posts.status, posts.author_id, posts.category_id,
 							IFNULL(categories.status_options, '[]') AS status_options,
-							IFNULL(categories.author_can_set_status, 0) AS author_can_set_status
+							IFNULL(categories.author_can_set_status, 0) AS author_can_set_status,
+							categories.name AS category_name,
+							users.email AS author_email,
+							IFNULL(users.email_notifications, 1) AS author_email_notifications
 						 FROM posts
 						 LEFT JOIN categories ON posts.category_id = categories.id
+						 LEFT JOIN users ON posts.author_id = users.id
 						 WHERE posts.id = ?`
 					)
 					.bind(postId)
 					.first<{
 						id: number;
+						title: string;
+						status: string | null;
 						author_id: number;
 						category_id: number | null;
 						status_options: string;
 						author_can_set_status: number;
+						category_name: string | null;
+						author_email: string | null;
+						author_email_notifications: number;
 					}>();
 				if (!post) return jsonResponse({ error: 'Post not found' }, 404);
 				const options = parseStatusOptions(post.status_options);
@@ -3568,15 +3593,48 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 				if (!isAdmin && !(isAuthor && authorAllowed)) {
 					return jsonResponse({ error: '无权修改状态' }, 403);
 				}
+				const prevStatus = String(post.status || '').trim();
+				if (prevStatus === nextStatus) {
+					return jsonResponse({ success: true, status: nextStatus });
+				}
 				await env.cforum_db.prepare('UPDATE posts SET status = ? WHERE id = ?').bind(nextStatus, postId).run();
 				await security.logAudit(
 					userPayload.id,
 					'SET_POST_STATUS',
 					'post',
 					postId,
-					{ status: nextStatus },
+					{ status: nextStatus, prev_status: prevStatus },
 					request
 				);
+
+				// Progress feedback email: other user changed status + dual switches
+				if (!isAuthor && post.author_email && Number(post.author_email_notifications) === 1) {
+					const notifyRow = await env.cforum_db
+						.prepare("SELECT value FROM settings WHERE key = 'notify_on_post_status_change'")
+						.first<DBSetting>();
+					const notifyEnabled = !notifyRow || notifyRow.value === '1';
+					if (notifyEnabled) {
+						const postUrl = `${getBaseUrl()}/post?id=${post.id}`;
+						const catLabel = post.category_name ? String(post.category_name) : '未分类';
+						const oldLabel = prevStatus || '（无）';
+						const safeTitle = String(post.title || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+						const emailHtml = `
+							<h1>帖子进度已更新</h1>
+							<p>您的帖子 <strong>${safeTitle}</strong>（${catLabel}）状态已更新。</p>
+							<p><strong>${oldLabel}</strong> → <strong>${nextStatus}</strong></p>
+							<p><a href="${postUrl}">查看帖子</a></p>
+						`;
+						ctx.waitUntil(
+							sendEmail(
+								post.author_email,
+								`您的帖子进度已更新：${String(post.title || '').slice(0, 40)}`,
+								emailHtml,
+								env
+							).catch(console.error)
+						);
+					}
+				}
+
 				return jsonResponse({ success: true, status: nextStatus });
 			} catch (e) {
 				return handleError(e);
