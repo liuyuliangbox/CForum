@@ -39,6 +39,7 @@ export type RelatedPostCard = {
 	category_id?: number | null;
 	category_name?: string | null;
 	author_name?: string;
+	author_avatar?: string | null;
 	created_at?: string;
 };
 

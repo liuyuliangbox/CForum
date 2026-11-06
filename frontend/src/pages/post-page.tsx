@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowLeft, Eye, EyeOff, Heart, Link2, MoreVertical, Pin, Pencil, Quote, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eye, EyeOff, Heart, Link2, MessageCircle, MoreVertical, Pin, Pencil, Quote, Reply, Shield, Star, Trash2, User, X } from 'lucide-react';
 
 import { AdminCooldownMenuItems, AdminCooldownTrigger } from '@/components/admin-cooldown-menu';
 import { MarkdownToolbar } from '@/components/markdown-toolbar';
@@ -136,6 +136,10 @@ export function PostPage() {
 	const [relationSearchLoading, setRelationSearchLoading] = React.useState(false);
 	const [relationSaving, setRelationSaving] = React.useState(false);
 	const [relationError, setRelationError] = React.useState('');
+	const [relatedExpanded, setRelatedExpanded] = React.useState(false);
+	const [relatedPage, setRelatedPage] = React.useState(0);
+	const [citedByExpanded, setCitedByExpanded] = React.useState(false);
+	const [citedByPage, setCitedByPage] = React.useState(0);
 	const [citeEditOpen, setCiteEditOpen] = React.useState(false);
 	const [citeSearch, setCiteSearch] = React.useState('');
 	const [citeSearchResults, setCiteSearchResults] = React.useState<Post[]>([]);
@@ -469,45 +473,49 @@ export function PostPage() {
 		}
 	}
 
-	function openRelationsManager() {
+	async function loadRelationCandidates(search?: string) {
 		if (!post) return;
-		setRelationSelectedIds((post.related_posts || []).map((p) => p.id));
-		setRelationSearch('');
-		setRelationSearchResults([]);
-		setRelationError('');
-		setRelationsOpen(true);
-		setAdminMenuOpen(false);
-	}
-
-	async function searchRelationTargets() {
-		if (!post) return;
-		const q = relationSearch.trim();
-		if (!q) {
-			setRelationSearchResults([]);
-			return;
-		}
 		setRelationSearchLoading(true);
 		setRelationError('');
 		try {
 			const linkableCategoryIds = new Set(
 				allCategories.filter((c) => !!c.enable_relate).map((c) => c.id)
 			);
+			const q = (search ?? relationSearch).trim();
+			const qParam = q ? `&q=${encodeURIComponent(q)}` : '';
 			const data = await apiFetch<{ posts: Post[] }>(
-				`/posts?limit=20&offset=0&q=${encodeURIComponent(q)}`,
+				`/posts?limit=40&offset=0&sort_by=time&sort_dir=desc${qParam}`,
 				{ headers: getSecurityHeaders('GET', null) }
 			);
 			setRelationSearchResults(
-				(data.posts || []).filter(
-					(p) =>
-						p.id !== post.id &&
-						(p.category_id == null || linkableCategoryIds.has(Number(p.category_id)))
-				)
+				(data.posts || [])
+					.filter(
+						(p) =>
+							p.id !== post.id &&
+							p.category_id != null &&
+							linkableCategoryIds.has(Number(p.category_id))
+					)
+					.slice(0, 10)
 			);
 		} catch (e: any) {
 			setRelationError(String(e?.message || e));
 		} finally {
 			setRelationSearchLoading(false);
 		}
+	}
+
+	function openRelationsManager() {
+		if (!post) return;
+		setRelationSelectedIds((post.related_posts || []).map((p) => p.id));
+		setRelationSearch('');
+		setRelationError('');
+		setRelationsOpen(true);
+		setAdminMenuOpen(false);
+		void loadRelationCandidates('');
+	}
+
+	async function searchRelationTargets() {
+		await loadRelationCandidates(relationSearch);
 	}
 
 	function goCiteCompose() {
@@ -572,10 +580,6 @@ export function PostPage() {
 	function toggleRelationId(id: number) {
 		setRelationSelectedIds((prev) => {
 			if (prev.includes(id)) return prev.filter((x) => x !== id);
-			if (prev.length >= 10) {
-				setRelationError('最多关联 10 个帖子');
-				return prev;
-			}
 			setRelationError('');
 			return [...prev, id];
 		});
@@ -600,25 +604,114 @@ export function PostPage() {
 		}
 	}
 
-	function renderRelationCards(items: RelatedPostCard[]) {
+	function renderRelationCardGrid(items: RelatedPostCard[]) {
 		return (
 			<div className="grid gap-2 sm:grid-cols-2">
 				{items.map((item) => (
 					<a
 						key={item.id}
 						href={`/post?id=${item.id}`}
-						className="block rounded-md border bg-background/70 p-3 transition-colors hover:bg-muted/40"
+						className="flex gap-3 rounded-md border bg-background/70 p-3 transition-colors hover:bg-muted/40"
 					>
-						<div className="line-clamp-2 text-sm font-medium">{item.title}</div>
-						<div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-							{item.category_name ? <span>{item.category_name}</span> : null}
-							{item.status ? (
-								<span className="rounded border px-1.5 py-0.5 text-[10px]">{item.status}</span>
-							) : null}
-							{item.author_name ? <span>{item.author_name}</span> : null}
+						{item.author_avatar ? (
+							<img
+								src={item.author_avatar}
+								alt=""
+								className="mt-0.5 h-8 w-8 shrink-0 rounded-full object-cover"
+								loading="lazy"
+								referrerPolicy="no-referrer"
+							/>
+						) : (
+							<span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+								<User className="h-4 w-4" />
+							</span>
+						)}
+						<div className="min-w-0 flex-1">
+							<div className="line-clamp-2 text-sm font-medium">{item.title}</div>
+							<div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+								{item.author_name ? <span>{item.author_name}</span> : null}
+								{item.category_name ? <span>{item.category_name}</span> : null}
+								{item.status ? (
+									<span className="rounded border px-1.5 py-0.5 text-[10px]">{item.status}</span>
+								) : null}
+							</div>
 						</div>
 					</a>
 				))}
+			</div>
+		);
+	}
+
+	function renderCollapsibleRelationCards(
+		items: RelatedPostCard[],
+		opts: {
+			expanded: boolean;
+			page: number;
+			onExpandedChange: (v: boolean) => void;
+			onPageChange: (p: number) => void;
+		}
+	) {
+		const pageSize = 10;
+		const collapsedCount = 2;
+		if (!items.length) return null;
+		const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+		const page = Math.min(opts.page, totalPages - 1);
+		const pageItems = items.slice(page * pageSize, page * pageSize + pageSize);
+		const visible = opts.expanded ? pageItems : items.slice(0, collapsedCount);
+		const canExpand = items.length > collapsedCount;
+		return (
+			<div className="space-y-2">
+				{renderRelationCardGrid(visible)}
+				{canExpand ? (
+					<div className="flex flex-wrap items-center gap-2">
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							onClick={() => {
+								opts.onExpandedChange(!opts.expanded);
+								if (opts.expanded) opts.onPageChange(0);
+							}}
+						>
+							{opts.expanded ? (
+								<>
+									<ChevronUp className="h-4 w-4" />
+									收起
+								</>
+							) : (
+								<>
+									<ChevronDown className="h-4 w-4" />
+									展开（共 {items.length}）
+								</>
+							)}
+						</Button>
+						{opts.expanded && items.length > pageSize ? (
+							<div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={page <= 0}
+									onClick={() => opts.onPageChange(page - 1)}
+								>
+									<ChevronLeft className="h-4 w-4" />
+								</Button>
+								<span>
+									{page + 1}/{totalPages}
+								</span>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={page >= totalPages - 1}
+									onClick={() => opts.onPageChange(page + 1)}
+								>
+									<ChevronRight className="h-4 w-4" />
+								</Button>
+							</div>
+						) : null}
+					</div>
+				) : null}
 			</div>
 		);
 	}
@@ -772,12 +865,24 @@ export function PostPage() {
 										<span className="tabular-nums">{post.like_count || 0}</span>
 										<span className="sr-only">{post.liked ? '取消点赞' : '点赞'}</span>
 									</Button>
+									<a
+										href="#comments"
+										className="inline-flex h-8 items-center gap-1 rounded-md border bg-muted/20 px-2 text-xs text-muted-foreground hover:bg-muted/40"
+										title="查看评论"
+									>
+										<MessageCircle className="h-4 w-4 text-sky-600" />
+										<span className="tabular-nums">{post.comment_count || comments.length || 0}</span>
+										<span className="sr-only">评论数</span>
+									</a>
 									<span className="inline-flex items-center gap-1 rounded-md border bg-muted/20 px-2 py-1 text-xs text-muted-foreground">
 										<Eye className="h-4 w-4 text-emerald-600" />
 										<span className="tabular-nums">{post.view_count || 0}</span>
 										<span className="sr-only">观看数</span>
 									</span>
 
+									{(!!post.category_enable_cited_from ||
+										(user && (user.role === 'admin' || user.id === post.author_id))) ? (
+										<div className="ml-auto flex flex-wrap items-center justify-end gap-2">
 									{!!post.category_enable_cited_from ? (
 										<Button
 											variant="outline"
@@ -791,16 +896,16 @@ export function PostPage() {
 										</Button>
 									) : null}
 
-									{user && (user.role === 'admin' || user.id === post.author_id) ? (
-										<div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-									{user.role === 'admin' ||
-									(user.id === post.author_id && Number(post.is_visible ?? 1) === 0) ? (
+									{user &&
+									(user.role === 'admin' ||
+										(user.id === post.author_id && Number(post.is_visible ?? 1) === 0)) ? (
 										<Button variant="outline" size="sm" onClick={() => setIsEditing((v) => !v)}>
 											{isEditing ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
 											<span className="sr-only">{isEditing ? '取消编辑' : '编辑'}</span>
 										</Button>
 									) : null}
 
+									{user && (user.role === 'admin' || user.id === post.author_id) ? (
 										<div className="relative z-30" ref={adminMenuRef}>
 											<Button
 												type="button"
@@ -947,6 +1052,7 @@ export function PostPage() {
 												</div>
 											) : null}
 										</div>
+									) : null}
 										</div>
 									) : null}
 								</div>
@@ -1040,7 +1146,7 @@ export function PostPage() {
 										</Button>
 									) : null}
 								</CardHeader>
-								<CardContent>{renderRelationCards([post.cited_post])}</CardContent>
+								<CardContent>{renderRelationCardGrid([post.cited_post])}</CardContent>
 							</Card>
 						) : null}
 
@@ -1051,7 +1157,14 @@ export function PostPage() {
 								<CardHeader>
 									<CardTitle className="text-base">被引用</CardTitle>
 								</CardHeader>
-								<CardContent>{renderRelationCards(post.cited_by_posts)}</CardContent>
+								<CardContent>
+									{renderCollapsibleRelationCards(post.cited_by_posts, {
+										expanded: citedByExpanded,
+										page: citedByPage,
+										onExpandedChange: setCitedByExpanded,
+										onPageChange: setCitedByPage
+									})}
+								</CardContent>
 							</Card>
 						) : null}
 
@@ -1149,7 +1262,12 @@ export function PostPage() {
 								</CardHeader>
 								<CardContent>
 									{post.related_posts && post.related_posts.length > 0 ? (
-										renderRelationCards(post.related_posts)
+										renderCollapsibleRelationCards(post.related_posts, {
+											expanded: relatedExpanded,
+											page: relatedPage,
+											onExpandedChange: setRelatedExpanded,
+											onPageChange: setRelatedPage
+										})
 									) : (
 										<div className="text-sm text-muted-foreground">暂无关联帖子</div>
 									)}
@@ -1160,7 +1278,7 @@ export function PostPage() {
 						{relationsOpen && user?.role === 'admin' && !!post.category_enable_relate ? (
 							<Card>
 								<CardHeader className="flex flex-row items-center justify-between space-y-0">
-									<CardTitle className="text-base">管理关联（最多 10 个）</CardTitle>
+									<CardTitle className="text-base">管理关联</CardTitle>
 									<Button variant="ghost" size="sm" onClick={() => setRelationsOpen(false)}>
 										<X className="h-4 w-4" />
 										<span className="sr-only">关闭</span>
@@ -1175,7 +1293,7 @@ export function PostPage() {
 									<div className="flex flex-wrap gap-2">
 										<Input
 											value={relationSearch}
-											placeholder="搜索可关联的帖子标题"
+											placeholder="搜索可关联的帖子（默认展示最新 10 条）"
 											className="max-w-sm"
 											onChange={(e) => setRelationSearch(e.target.value)}
 											onKeyDown={(e) => {
@@ -1190,13 +1308,13 @@ export function PostPage() {
 											disabled={relationSearchLoading}
 											onClick={() => void searchRelationTargets()}
 										>
-											{relationSearchLoading ? '搜索中…' : '搜索'}
+											{relationSearchLoading ? '加载中…' : '搜索'}
 										</Button>
 									</div>
 									{relationSelectedIds.length ? (
 										<div className="space-y-1">
 											<div className="text-xs font-medium text-muted-foreground">
-												已选 {relationSelectedIds.length}/10
+												已选 {relationSelectedIds.length}
 											</div>
 											<div className="flex flex-wrap gap-2">
 												{relationSelectedIds.map((id) => {
@@ -1218,8 +1336,11 @@ export function PostPage() {
 											</div>
 										</div>
 									) : null}
+									{relationSearchLoading && !relationSearchResults.length ? (
+										<div className="text-sm text-muted-foreground">加载可关联帖子…</div>
+									) : null}
 									{relationSearchResults.length ? (
-										<div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
+										<div className="max-h-72 space-y-1 overflow-y-auto rounded-md border p-2">
 											{relationSearchResults.map((p) => {
 												const selected = relationSelectedIds.includes(p.id);
 												return (
@@ -1227,12 +1348,25 @@ export function PostPage() {
 														key={p.id}
 														type="button"
 														className={cn(
-															'flex w-full items-start justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted',
+															'flex w-full items-start gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted',
 															selected ? 'bg-muted font-medium' : ''
 														)}
 														onClick={() => toggleRelationId(p.id)}
 													>
-														<span className="line-clamp-2">{p.title}</span>
+														{p.author_avatar ? (
+															<img
+																src={p.author_avatar}
+																alt=""
+																className="mt-0.5 h-6 w-6 shrink-0 rounded-full object-cover"
+																loading="lazy"
+																referrerPolicy="no-referrer"
+															/>
+														) : (
+															<span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+																<User className="h-3.5 w-3.5" />
+															</span>
+														)}
+														<span className="min-w-0 flex-1 line-clamp-2">{p.title}</span>
 														<span className="shrink-0 text-xs text-muted-foreground">
 															{selected ? '已选' : p.category_name || ''}
 														</span>
@@ -1240,6 +1374,8 @@ export function PostPage() {
 												);
 											})}
 										</div>
+									) : !relationSearchLoading ? (
+										<div className="text-sm text-muted-foreground">暂无可关联帖子（需目标分类已启用关联）</div>
 									) : null}
 									<div className="flex gap-2">
 										<Button onClick={() => void saveRelations()} disabled={relationSaving}>
@@ -1265,7 +1401,7 @@ export function PostPage() {
 							</div>
 						) : null}
 
-						<Card>
+						<Card id="comments">
 							<CardHeader>
 								<CardTitle>评论</CardTitle>
 							</CardHeader>

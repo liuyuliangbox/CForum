@@ -65,7 +65,8 @@ async function validateCitedPostId(
 const RELATION_CARD_SQL = `SELECT
 		posts.id, posts.title, posts.status, posts.category_id, posts.created_at,
 		categories.name AS category_name,
-		users.username AS author_name
+		users.username AS author_name,
+		users.avatar_url AS author_avatar
 	 FROM posts
 	 JOIN users ON posts.author_id = users.id
 	 LEFT JOIN categories ON posts.category_id = categories.id`;
@@ -3311,7 +3312,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 							.map((x: any) => Number(x))
 							.filter((n: number) => Number.isFinite(n) && n > 0 && n !== postId)
 					)
-				].slice(0, 10) as number[];
+				] as number[];
 
 				if (relatedIds.length) {
 					const placeholders = relatedIds.map(() => '?').join(',');
