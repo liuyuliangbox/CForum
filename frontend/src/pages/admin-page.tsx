@@ -234,6 +234,7 @@ export function AdminPage() {
 				})
 			});
 			invalidateConfigCache();
+			setOpsPlaybookEditing(false);
 			alert('设置已保存');
 		} catch (e: any) {
 			setError(String(e?.message || e));
