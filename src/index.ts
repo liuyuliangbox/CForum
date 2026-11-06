@@ -3198,7 +3198,7 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 							 WHERE posts.cited_post_id = ?
 							   AND IFNULL(posts.is_visible, 1) = 1
 							 ORDER BY posts.created_at DESC
-							 LIMIT 50`
+							 LIMIT 200`
 						)
 						.bind(postId)
 						.all();

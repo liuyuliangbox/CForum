@@ -1158,7 +1158,12 @@ export function PostPage() {
 						post.cited_by_posts.length > 0 ? (
 							<Card>
 								<CardHeader>
-									<CardTitle className="text-base">被引用</CardTitle>
+									<CardTitle className="text-base">
+										被引用
+										<span className="ml-2 text-sm font-normal text-muted-foreground">
+											共 {post.cited_by_posts.length} 个
+										</span>
+									</CardTitle>
 								</CardHeader>
 								<CardContent>
 									{renderCollapsibleRelationCards(post.cited_by_posts, {
@@ -1256,7 +1261,14 @@ export function PostPage() {
 							(user?.role === 'admin' && relationsOpen)) ? (
 							<Card>
 								<CardHeader className="flex flex-row items-center justify-between space-y-0">
-									<CardTitle className="text-base">相关帖子</CardTitle>
+									<CardTitle className="text-base">
+										相关帖子
+										{post.related_posts && post.related_posts.length > 0 ? (
+											<span className="ml-2 text-sm font-normal text-muted-foreground">
+												共 {post.related_posts.length} 个
+											</span>
+										) : null}
+									</CardTitle>
 									{user?.role === 'admin' ? (
 										<Button variant="outline" size="sm" onClick={() => openRelationsManager()}>
 											管理
