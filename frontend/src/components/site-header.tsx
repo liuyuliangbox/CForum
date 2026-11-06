@@ -60,46 +60,52 @@ export function SiteHeader({
 
 	return (
 		<header className="w-full border-b bg-background">
-			<div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4">
+			<div className="mx-auto flex max-w-5xl items-center gap-1.5 px-3 py-3 sm:gap-3 sm:px-4 sm:py-4">
 				<a
 					href="/"
-					className="inline-flex items-center justify-center rounded-md border border-transparent p-2 text-foreground hover:bg-muted/40"
+					className="inline-flex shrink-0 items-center justify-center rounded-md border border-transparent p-2 text-foreground hover:bg-muted/40"
 				>
 					<Home className="h-5 w-5" />
 					<span className="sr-only">主页</span>
 				</a>
-				<div className="flex items-center gap-2">
+
+				{user ? (
+					<span className="flex min-w-0 flex-1 items-center gap-2 text-sm text-muted-foreground">
+						{user.avatar_url ? (
+							<img
+								src={user.avatar_url}
+								alt=""
+								className="h-7 w-7 shrink-0 rounded-full object-cover"
+								loading="lazy"
+								referrerPolicy="no-referrer"
+							/>
+						) : (
+							<span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground">
+								<UserIcon className="h-4 w-4" />
+							</span>
+						)}
+						<span className="min-w-0 truncate" title={user.username}>
+							<span className="hidden sm:inline">欢迎，</span>
+							<span className="text-foreground">{user.username}</span>
+						</span>
+						{user.role === 'admin' ? (
+							<span className="inline-flex shrink-0 items-center gap-1 rounded border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300 sm:px-2">
+								<Shield className="h-3 w-3" />
+								<span className="sr-only">管理员</span>
+							</span>
+						) : null}
+					</span>
+				) : (
+					<span className="min-w-0 flex-1" aria-hidden />
+				)}
+
+				<div className="flex shrink-0 items-center gap-0.5 sm:gap-2">
 					<Button type="button" variant="ghost" size="sm" onClick={toggleTheme}>
 						{theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
 						<span className="sr-only">切换主题</span>
 					</Button>
 					{user ? (
 						<>
-							<span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-								{user.avatar_url ? (
-									<img
-										src={user.avatar_url}
-										alt=""
-										className="h-7 w-7 rounded-full object-cover"
-										loading="lazy"
-										referrerPolicy="no-referrer"
-									/>
-								) : (
-									<span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground">
-										<UserIcon className="h-4 w-4" />
-									</span>
-								)}
-								<span className="max-w-[7.5rem] truncate sm:max-w-none">
-									<span className="hidden sm:inline">欢迎，</span>
-									<span className="text-foreground">{user.username}</span>
-								</span>
-								{user.role === 'admin' ? (
-									<span className="inline-flex items-center gap-1 rounded border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
-										<Shield className="h-3 w-3" />
-										<span className="sr-only">管理员</span>
-									</span>
-								) : null}
-							</span>
 							{user.role === 'admin' && adminHref ? (
 								<Button asChild variant="ghost" size="sm">
 									<a href={adminHref} rel="nofollow">
@@ -114,7 +120,7 @@ export function SiteHeader({
 									<span className="sr-only">设置</span>
 								</a>
 							</Button>
-							<Separator orientation="vertical" className="h-6" />
+							<Separator orientation="vertical" className="mx-0.5 hidden h-6 sm:block" />
 							<Button
 								variant="destructive"
 								size="sm"
