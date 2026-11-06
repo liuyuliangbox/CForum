@@ -2,7 +2,8 @@ import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { getUser, logout, type User } from '@/lib/auth';
+import { apiFetch, getSecurityHeaders } from '@/lib/api';
+import { getUser, logout, setUser, type User } from '@/lib/auth';
 import { getTheme, toggleTheme, type Theme } from '@/lib/theme';
 import { Home, LogIn, LogOut, Moon, Settings, Shield, Sun, User as UserIcon, UserPlus } from 'lucide-react';
 
@@ -15,6 +16,7 @@ export function SiteHeader({
 }) {
 	const user = currentUser ?? getUser();
 	const [theme, setTheme] = React.useState<Theme>(() => getTheme());
+	const [adminHref, setAdminHref] = React.useState(user?.admin_panel_path || '');
 
 	React.useEffect(() => {
 		function onThemeChange(e: Event) {
@@ -25,6 +27,37 @@ export function SiteHeader({
 		setTheme(getTheme());
 		return () => window.removeEventListener('theme-change', onThemeChange as any);
 	}, []);
+
+	React.useEffect(() => {
+		if (!user || user.role !== 'admin') {
+			setAdminHref('');
+			return;
+		}
+		if (user.admin_panel_path) {
+			setAdminHref(user.admin_panel_path);
+			return;
+		}
+		let cancelled = false;
+		(async () => {
+			try {
+				const data = await apiFetch<{ path: string }>('/admin/entry', {
+					headers: getSecurityHeaders('GET')
+				});
+				if (cancelled || !data?.path) return;
+				setAdminHref(data.path);
+				const latest = getUser();
+				if (latest && latest.id === user.id) {
+					setUser({ ...latest, admin_panel_path: data.path });
+				}
+			} catch {
+				/* ignore — link stays hidden if path unavailable */
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [user?.id, user?.role, user?.admin_panel_path]);
+
 	return (
 		<header className="w-full border-b bg-background">
 			<div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4">
@@ -67,9 +100,9 @@ export function SiteHeader({
 									</span>
 								) : null}
 							</span>
-							{user.role === 'admin' ? (
+							{user.role === 'admin' && adminHref ? (
 								<Button asChild variant="ghost" size="sm">
-									<a href="/admin">
+									<a href={adminHref} rel="nofollow">
 										<Shield className="h-4 w-4" />
 										<span className="sr-only">管理后台</span>
 									</a>

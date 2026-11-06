@@ -1,0 +1,9 @@
+User-agent: *
+Disallow: /admin
+Disallow: /admin.html
+Disallow: /c-ops-k7m2xq
+Disallow: /c-ops-k7m2xq.html
+Disallow: /api/
+Disallow: /settings
+Disallow: /login
+Disallow: /register

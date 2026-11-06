@@ -1,10 +1,14 @@
 /**
  * Cloudflare Pages Functions - API Proxy to Worker
  * Routes /api/* and /r2/* to Worker; rewrites pretty post URLs to /post?id=
+ * Also closes the legacy /admin entry.
  */
+
+import { getAdminPanelPath } from '../shared/admin-panel-path';
 
 export const onRequest: PagesFunction<{
 	WORKER_URL?: string;
+	ADMIN_PANEL_PATH?: string;
 	ASSETS: { fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> };
 }> = async (context) => {
 	const { request, env } = context;
@@ -20,6 +24,30 @@ export const onRequest: PagesFunction<{
 			dest.searchParams.set(key, value);
 		}
 		return Response.redirect(dest.toString(), 302);
+	}
+
+	// Legacy admin entry: do not serve (obscure path is a static HTML asset)
+	if (pathname === '/admin' || pathname === '/admin.html') {
+		return new Response('Not Found', {
+			status: 404,
+			headers: {
+				'Content-Type': 'text/plain; charset=utf-8',
+				'X-Robots-Tag': 'noindex, nofollow',
+				'Cache-Control': 'no-store'
+			}
+		});
+	}
+
+	const panelSlug = getAdminPanelPath(env.ADMIN_PANEL_PATH);
+	if (pathname === `/${panelSlug}` || pathname === `/${panelSlug}.html`) {
+		const assetUrl = new URL(`/${panelSlug}.html`, url.origin);
+		const assetRes = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
+		const headers = new Headers(assetRes.headers);
+		headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+		headers.set('X-Frame-Options', 'DENY');
+		headers.set('Referrer-Policy', 'no-referrer');
+		headers.set('Cache-Control', 'no-store');
+		return new Response(assetRes.body, { status: assetRes.status, statusText: assetRes.statusText, headers });
 	}
 
 	const isApiRoute = pathname.startsWith('/api/');
@@ -78,12 +106,6 @@ export const onRequest: PagesFunction<{
 		});
 	} catch (error) {
 		console.error('❌ API proxy error:', error);
-		return Response.json(
-			{
-				error: 'Failed to forward API request',
-				message: String(error)
-			},
-			{ status: 502, headers: corsHeaders }
-		);
+		return Response.json({ error: 'Upstream API unavailable' }, { status: 502, headers: corsHeaders });
 	}
 };

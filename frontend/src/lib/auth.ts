@@ -6,6 +6,8 @@ export type User = {
 	role?: 'user' | 'admin';
 	totp_enabled?: boolean;
 	email_notifications?: boolean;
+	/** Obscure admin UI path; only present for admins */
+	admin_panel_path?: string;
 };
 
 const TOKEN_KEY = 'token';

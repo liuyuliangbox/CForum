@@ -27,6 +27,7 @@ import {
 	parseStatusOptions,
 	serializeStatusOptions
 } from './category-status';
+import { adminPanelHref, getAdminPanelPath } from '../shared/admin-panel-path';
 
 /** Validate cited_post_id for create/update. Returns error message or null. */
 async function validateCitedPostId(
@@ -1495,6 +1496,7 @@ export default {
 				await env.cforum_db.prepare('INSERT INTO sessions (jti, user_id, expires_at) VALUES (?, ?, ?)').bind(jti, user.id, expiresAt).run();
 				await security.logAudit(user.id, 'LOGIN', 'user', String(user.id), { email }, request);
 
+				const role = user.role || 'user';
 				return jsonResponse({
 					token,
 					user: {
@@ -1502,10 +1504,28 @@ export default {
 						email: user.email,
 						username: user.username,
 						avatar_url: user.avatar_url,
-						role: user.role || 'user',
+						role,
 						totp_enabled: !!user.totp_enabled,
-						email_notifications: user.email_notifications === 1
+						email_notifications: user.email_notifications === 1,
+						...(role === 'admin'
+							? { admin_panel_path: adminPanelHref((env as any).ADMIN_PANEL_PATH) }
+							: {})
 					}
+				});
+			} catch (e) {
+				return handleError(e);
+			}
+		}
+
+		// GET /api/admin/entry — obscure panel path for authenticated admins only
+		if (url.pathname === '/api/admin/entry' && method === 'GET') {
+			try {
+				const userPayload = await authenticate(request);
+				if (userPayload.role !== 'admin') return jsonResponse({ error: 'Unauthorized' }, 403);
+				const path = adminPanelHref((env as any).ADMIN_PANEL_PATH);
+				return jsonResponse({ path }, 200, {
+					'Cache-Control': 'no-store',
+					'X-Robots-Tag': 'noindex, nofollow'
 				});
 			} catch (e) {
 				return handleError(e);
@@ -1593,6 +1613,7 @@ export default {
 
 			const user = await env.cforum_db.prepare('SELECT * FROM users WHERE id = ?').bind(user_id).first<DBUser>();
 			if (!user) return jsonResponse({ error: 'User not found' }, 404);
+				const role = user.role || 'user';
 				return jsonResponse({
 					success: true,
 					user: {
@@ -1600,9 +1621,12 @@ export default {
 						email: user.email,
 						username: user.username,
 						avatar_url: user.avatar_url,
-						role: user.role || 'user',
+						role,
 						totp_enabled: !!user.totp_enabled,
-						email_notifications: user.email_notifications === 1
+						email_notifications: user.email_notifications === 1,
+						...(role === 'admin'
+							? { admin_panel_path: adminPanelHref((env as any).ADMIN_PANEL_PATH) }
+							: {})
 					}
 				});
 			} catch (e) {
@@ -4171,20 +4195,45 @@ const user = await env.cforum_db.prepare('SELECT * FROM users WHERE email_change
 			}
 
 			if (!(env as any).ASSETS?.fetch) return new Response('Not Found', { status: 404 });
+
+			const panelSlug = getAdminPanelPath((env as any).ADMIN_PANEL_PATH);
+			const panelHtml = `/${panelSlug}.html`;
+			const noIndexHeaders = {
+				'X-Robots-Tag': 'noindex, nofollow, noarchive',
+				'X-Frame-Options': 'DENY',
+				'Referrer-Policy': 'no-referrer',
+				'Cache-Control': 'no-store'
+			};
+
+			// Legacy /admin entry is intentionally closed
+			if (pathname === '/admin' || pathname === '/admin.html') {
+				return new Response('Not Found', {
+					status: 404,
+					headers: { ...corsHeaders, ...noIndexHeaders }
+				});
+			}
+
 			const mapped =
 				pathname === '/login' ? '/login.html' :
 				pathname === '/register' ? '/register.html' :
 				pathname === '/forgot' ? '/forgot.html' :
 				pathname === '/reset' ? '/reset.html' :
 				pathname === '/settings' ? '/settings.html' :
-				pathname === '/admin' ? '/admin.html' :
+				pathname === `/${panelSlug}` || pathname === panelHtml ? panelHtml :
 				pathname === '/post' ? '/post.html' :
 				pathname;
 
 			const assetUrl = new URL(request.url);
 			assetUrl.pathname = mapped;
 			const assetRes = await (env as any).ASSETS.fetch(new Request(assetUrl, request));
-			if (assetRes.status !== 404) return assetRes;
+			if (assetRes.status !== 404) {
+				if (mapped === panelHtml) {
+					const headers = new Headers(assetRes.headers);
+					for (const [k, v] of Object.entries(noIndexHeaders)) headers.set(k, v);
+					return new Response(assetRes.body, { status: assetRes.status, headers });
+				}
+				return assetRes;
+			}
 			if (mapped !== pathname) {
 				const directRes = await (env as any).ASSETS.fetch(request);
 				if (directRes.status !== 404) return directRes;

@@ -1,3 +1,7 @@
 # Pretty post URLs → detail page (keep query id)
 /posts/*  /post?id=:splat  302
 /post/*   /post?id=:splat  302
+
+# Hide legacy admin entry (do not advertise panel location)
+/admin     /index.html  404
+/admin.html /index.html  404
